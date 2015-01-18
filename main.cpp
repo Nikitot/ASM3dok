@@ -145,7 +145,7 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 		Point newP(allPoints.at(i).x - thisCenter.x, allPoints.at(i).y - thisCenter.y);
 		allPoints.at(i).x = (newP.x * cos(-angle) - newP.y * sin(-angle)) + maxFaceSize.width / 2;
 		allPoints.at(i).y = (newP.x * sin(-angle) + newP.y * cos(-angle)) + maxFaceSize.height / 2;
-	}
+	}	
 }
 
 //return max size for scaling result face
@@ -203,7 +203,8 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 		faceFrameInfo.thisCenter.push_back(thisCenter);
 	}
 
-	faceFrameInfo.maxSize.width += faceFrameInfo.maxSize.width / 20;
+	faceFrameInfo.maxSize.width += faceFrameInfo.maxSize.width / 4;
+	faceFrameInfo.maxSize.height += faceFrameInfo.maxSize.height / 4;
 }
 
 void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, int numFrame){
@@ -324,10 +325,10 @@ int main(int argc, char* argv[])
 
 	for (int i = 0; i < facesKeyPoints.size(); i++)
 	{
-
-		framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+		//framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
-		//getTexture(frames[i], facesKeyPoints.at(i));
+		getTexture(frames[i], facesKeyPoints.at(i));
+		
 
 		if (frameNums.size() != 0)
 		{
@@ -336,12 +337,11 @@ int main(int argc, char* argv[])
 			imwrite(fileName.str(), frames[i]);
 
 			resultCoords << "frame " << frameNums.at(i) << ":" << endl;
-			resultCoords << "center :" << faceFrameInfo.thisCenter[i].x << " " << faceFrameInfo.thisCenter[i].y << endl;
+			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
 
 			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
-			{
-				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.thisCenter[i].x << " " << facesKeyPoints.at(i).at(p).y - faceFrameInfo.thisCenter[i].y << endl;
-			}
+				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
+			
 			resultCoords << endl;
 		}
 
@@ -350,21 +350,6 @@ int main(int argc, char* argv[])
 
 		if (waitKey(33)){}
 	}
-
-
-	/*
-
-	for fan :)
-
-	*/
-
-	for (int i = frames.size() - 1; i >= 0; i--)
-	{
-		writer.write(frames[i]);
-	}
-	resultCoords.close();
-	writer.release();
-
 
 	return 0;
 }
