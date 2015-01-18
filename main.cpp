@@ -340,7 +340,7 @@ int main(int argc, char* argv[])
 			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
 
 			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
-				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
+				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.maxSize.width / 2 << " " << facesKeyPoints.at(i).at(p).y - faceFrameInfo.maxSize.height / 2 << endl;
 			
 			resultCoords << endl;
 		}
