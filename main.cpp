@@ -97,7 +97,7 @@ void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* pat
 		cap >> frame;
 		if (cvWaitKey(33) == 27 || !cap.read(frame)) break;
 
-		if (frameNums.size() > 0){
+		if (!frameNums.empty()){
 			for (int i = 0; i < frameNums.size(); i++)
 			if (frameNums.at(i) == frameIt)
 				writeAndRotateImage(frame, warp, frames);
@@ -150,21 +150,20 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 
 //return max size for scaling result face
 void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, FaceFramesInfo &faceFrameInfo){
-	Mat_<unsigned char> img = (imread("./FRONT.jpg", CV_LOAD_IMAGE_GRAYSCALE));
-	Mat img_grid;
+	Mat_<unsigned char> img;
 
 	for (int f = 0; f < frames.size(); f++){
-		img_grid = Mat(img.rows, img.cols, CV_LOAD_IMAGE_GRAYSCALE);
 		cvtColor(frames[f], img, CV_RGB2GRAY);
 
 		int foundface;
 		float landmarks[2 * stasm_NLANDMARKS]; // x,y coords (note the 2)
 
-		if (!stasm_search_single(&foundface, landmarks, (const char*)img.data, img.cols, img.rows, "./FRONT.jpg", "./data"))
+		if (!stasm_search_single(&foundface, landmarks, (const char*)img.data, img.cols, img.rows, NULL, "./data"))
 		{
 			printf("Error in stasm_search_single: %s\n", stasm_lasterr());
 			exit(1);
 		}
+		
 		vector<Point> facePoints;
 		double percent = ((double)f / (double)frames.size()) * 100;
 		Point2f thisCenter(-1, -1);
@@ -202,7 +201,7 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 		facesKeyPoints.push_back(facePoints);
 		faceFrameInfo.thisCenter.push_back(thisCenter);
 	}
-
+	
 	faceFrameInfo.maxSize.width += faceFrameInfo.maxSize.width / 4;
 	faceFrameInfo.maxSize.height += faceFrameInfo.maxSize.height / 4;
 }
@@ -325,10 +324,10 @@ int main(int argc, char* argv[])
 
 	for (int i = 0; i < facesKeyPoints.size(); i++)
 	{
-		//framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+		
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
 		getTexture(frames[i], facesKeyPoints.at(i));
-		
+		framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
 
 		if (frameNums.size() != 0)
 		{

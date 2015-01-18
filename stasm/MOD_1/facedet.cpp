@@ -180,7 +180,7 @@ void FaceDet::DetectFaces_( // call once per image to find all the faces
 {
     CV_Assert(user == NULL);
     DetectFaces(detpars_, img, minwidth);
-    char tracepath[SLEN];
+    /*char tracepath[SLEN];
     sprintf(tracepath, "%s_00_unsortedfacedet.bmp", Base(imgpath));
     TraceFaces(detpars_, img, tracepath);
     DiscardMissizedFaces(detpars_);
@@ -198,7 +198,7 @@ void FaceDet::DetectFaces_( // call once per image to find all the faces
         TraceFaces(detpars_, img, tracepath);
         if (NSIZE(detpars_))
             detpars_.resize(1);
-    }
+    }*/
     iface_ = 0; // next invocation of NextFace_ must get first face
 }
 

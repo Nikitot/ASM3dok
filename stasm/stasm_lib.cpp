@@ -5,7 +5,7 @@
 #include "stasm.h"
 
 using namespace stasm;
-
+static bool init = false;
 const char* const stasm_VERSION = STASM_VERSION;
 
 static vec_Mod mods_g;    // the ASM model(s)
@@ -114,7 +114,7 @@ int stasm_open_image_ext(  // extended version of stasm_open_image
     CatchOpenCvErrs();
     try
     {
-        CV_Assert(imgpath && STRNLEN(imgpath, SLEN) < SLEN);
+        //CV_Assert(imgpath && STRNLEN(imgpath, SLEN) < SLEN);
         CV_Assert(multiface == 0 || multiface == 1);
         CV_Assert(minwidth >= 1 && minwidth <= 100);
 
@@ -223,8 +223,12 @@ int stasm_search_single(   // wrapper for stasm_search_auto and friends
     const char* imgpath,   // in: image path, used only for err msgs and debug
     const char* datadir)   // in: directory of face detector files
 {
-    if (!stasm_init(datadir, 0 /*trace*/))
-        return false;
+	if (init == false)
+	{
+		init = true;
+		if (!stasm_init(datadir, 0 /*trace*/))
+			return false;
+	}
 
     if (!stasm_open_image(img, width, height, imgpath,
                           0 /*multiface*/, 10 /*minwidth*/))
