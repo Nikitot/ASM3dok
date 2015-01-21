@@ -86,8 +86,8 @@ void writeAndRotateImage(Mat &frame, int angle, vector <Mat> &frames){
 
 void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* path, int warp){
 
-	VideoCapture cap(path);
-	//VideoCapture cap(0);
+	//VideoCapture cap(path);
+	VideoCapture cap(0);
 	if (!cap.isOpened())  // check if we succeeded
 		return;
 
@@ -98,7 +98,7 @@ void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* pat
 		if (cvWaitKey(33) == 27 || !cap.read(frame)) break;
 
 		if (!frameNums.empty()){
-			for (int i = 0; i < frameNums.size(); i++)
+			for (size_t i = 0; i < frameNums.size(); i++)
 			if (frameNums.at(i) == frameIt)
 				writeAndRotateImage(frame, warp, frames);
 		}
@@ -112,7 +112,32 @@ void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* pat
 
 }
 
-void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceSize, Point thisCenter){
+void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
+
+
+	Point2f srcTri[3], dstTri[3];
+	Mat warp_mat = Mat(2, 3, CV_32FC1);
+	Mat dst = frame.clone();
+
+	srcTri[0] = Point2f(0, 0);						//src Top left
+	srcTri[1] = Point2f(frame.cols - 1, 0);			//src Top right
+	srcTri[2] = Point2f(0, frame.rows - 1);			//src Bottom left
+
+	dstTri[0] = Point2f(0 + shift.x, 0 + shift.y);						//dst Top left
+	dstTri[1] = Point2f(frame.cols - 1 + shift.x, 0 + shift.y);			//dst Top right
+	dstTri[2] = Point2f(0 + shift.x, frame.rows - 1 + shift.y);			//dst Bottom left
+
+	// âûïîëíÿåì òðàíñôîðìàöèþ
+	warpAffine(frame, dst, getAffineTransform(srcTri, dstTri), dst.size());
+	frame = dst;
+
+	for (unsigned int i = 0; i < allPoints.size(); i++){
+		allPoints.at(i).x += shift.x;
+		allPoints.at(i).y += shift.y;
+	}
+}
+
+void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceSize, Point2f &thisCenter){
 	//doesn not work if the ROI is beyond the border of the max size
 
 	if (thisCenter.x < 0 || thisCenter.y < 0){
@@ -120,41 +145,78 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 		nullFrame.copyTo(frame);
 		return;
 	}
+
+	int rect_x = thisCenter.x - maxFaceSize.width / 2;
+	int rect_y = thisCenter.y - maxFaceSize.height / 2;
+	int rect_width = maxFaceSize.width;
+	int rect_height = maxFaceSize.height;
+
+	bool capable_displacement[2] = { true , true };
+
+	if (rect_x + rect_width >= frame.cols){
+		shiftImageAndPointsFromBorder(frame, allPoints, Point(-(rect_x + rect_width - frame.cols), 0));
+		thisCenter.x += -(rect_x + rect_width - frame.cols);
+		capable_displacement[0] = false;
+	}
+	if (rect_y + rect_height >= frame.rows){
+		shiftImageAndPointsFromBorder(frame, allPoints, Point(0, -(rect_y + rect_height - frame.rows)));
+		thisCenter.y += -(rect_y + rect_height - frame.rows);
+		capable_displacement[1] = false;
+	}
+	if (rect_x <= 0 && capable_displacement[0])
+	{
+		shiftImageAndPointsFromBorder(frame, allPoints, Point(-rect_x, 0));
+		thisCenter.x += -rect_x;		
+	}
+	if (rect_y <= 0 && capable_displacement[1]){
+		shiftImageAndPointsFromBorder(frame, allPoints, Point(0, -rect_y));
+		thisCenter.y += -rect_y;		
+	}
+
+
 	Mat stableFrame(frame.cols, frame.rows, frame.type());
 	float angle = 0;
 	float dy = (allPoints.at(44).y - allPoints.at(34).y);
 	float dx = (allPoints.at(44).x - allPoints.at(34).x);
 
-	if (dx)
-		angle = atan(dy / dx);
+	if (dx) angle = atan(dy / dx);
 
 	Mat rot_mat = getRotationMatrix2D(thisCenter, angle*57.3, 1);
 	warpAffine(frame, stableFrame, rot_mat, frame.size());
 
-	try{
-		Rect region_of_interest = Rect(thisCenter.x - maxFaceSize.width / 2, thisCenter.y - maxFaceSize.height / 2, maxFaceSize.width, maxFaceSize.height);
+	imshow("goodframe", stableFrame);
+	waitKey(0);
+
+	
+	Rect region_of_interest = Rect(thisCenter.x - maxFaceSize.width / 2, thisCenter.y - maxFaceSize.height / 2, maxFaceSize.width, maxFaceSize.height);
+	if (region_of_interest.x >= 0 && region_of_interest.y >= 0){
+
 		Mat image_roi = stableFrame(region_of_interest);
 		image_roi.copyTo(frame);
+
+		for (unsigned int i = 0; i < allPoints.size(); i++){
+			Point newP(allPoints.at(i).x - thisCenter.x, allPoints.at(i).y - thisCenter.y);
+			allPoints.at(i).x = (newP.x * cos(-angle) - newP.y * sin(-angle)) + maxFaceSize.width / 2;
+			allPoints.at(i).y = (newP.x * sin(-angle) + newP.y * cos(-angle)) + maxFaceSize.height / 2;
+		}
 	}
-	catch (...){
+	else 
+	{
 		Mat nullFrame(maxFaceSize.height, maxFaceSize.width, frame.type());
+		for (unsigned int i = 0; i < allPoints.size(); i++)
+			allPoints.at(i) = Point(-1, -1);
 		nullFrame.copyTo(frame);
 		return;
 	}
-	for (int i = 0; i < allPoints.size(); i++){
-		Point newP(allPoints.at(i).x - thisCenter.x, allPoints.at(i).y - thisCenter.y);
-		allPoints.at(i).x = (newP.x * cos(-angle) - newP.y * sin(-angle)) + maxFaceSize.width / 2;
-		allPoints.at(i).y = (newP.x * sin(-angle) + newP.y * cos(-angle)) + maxFaceSize.height / 2;
-	}	
+	
 }
 
 //return max size for scaling result face
 void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, FaceFramesInfo &faceFrameInfo){
 	Mat_<unsigned char> img;
 
-	for (int f = 0; f < frames.size(); f++){
+	for (unsigned int f = 0; f < frames.size(); f++){
 		cvtColor(frames[f], img, CV_RGB2GRAY);
-
 		int foundface;
 		float landmarks[2 * stasm_NLANDMARKS]; // x,y coords (note the 2)
 
@@ -163,7 +225,7 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 			printf("Error in stasm_search_single: %s\n", stasm_lasterr());
 			exit(1);
 		}
-		
+
 		vector<Point> facePoints;
 		double percent = ((double)f / (double)frames.size()) * 100;
 		Point2f thisCenter(-1, -1);
@@ -201,13 +263,13 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 		facesKeyPoints.push_back(facePoints);
 		faceFrameInfo.thisCenter.push_back(thisCenter);
 	}
-	
+
 	faceFrameInfo.maxSize.width += faceFrameInfo.maxSize.width / 4;
 	faceFrameInfo.maxSize.height += faceFrameInfo.maxSize.height / 4;
 }
 
 void framePointsÑoloring(Mat &frame, vector <Point> &keyPoints, Point center, int numFrame){
-	for (int p = 0; p < keyPoints.size(); p++){
+	for (unsigned int p = 0; p < keyPoints.size(); p++){
 		circle(frame, keyPoints.at(p), 1, Scalar(255, 128, 128), 2);
 	}
 
@@ -228,43 +290,31 @@ void framePointsÑoloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 	putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
-void drawOptFlowMap(const Mat& flow, Mat& cflowmap, int step, double scale, const Scalar& color)
+void drawOptFlowMap(const Mat& flow, Mat& frame, int step, double scale, const Scalar& color)
 {
-	double xx = 0, yy = 0;
 	int x, y;
-	for (y = 0; y < cflowmap.rows; y += step)
-	for (x = 0; x < cflowmap.cols; x += step)
-	{
-		const Point2f& fxy = flow.at<Point2f>(y, x);
+	for (y = 0; y < flow.rows; y += step){
+		for (x = 0; x < flow.cols; x += step)
+		{
+			const Point2f& fxy = flow.at<Point2f>(y, x);
 
-		Point p1(x, y);
-		Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
+			Point p1(x, y);
+			Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
 
-		line(cflowmap, p1, p2, color);
-
-		//if (trackPoint.x >= p1.x && trackPoint.y >= p1.y && trackPoint.x < p1.x + 6 && trackPoint.y < p1.y + 6)
-		//{
-		//	trackPoint = p2;
-		//	line(cflowmap, p1, trackPoint, CV_RGB(255, 0, 0));
-		//	circle(cflowmap, trackPoint, 3, CV_RGB(255, 0, 0));
-		//}
-
+			line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
+		}
 	}
-	xx /= x*y;
-	yy /= x*y;
 }
 
-void impositionOptFlow(Mat &frame, Mat &prevgray){
-	Mat gray, flow, cflow;
+void impositionOptFlow(Mat &frame, Mat &prevgray, Mat &gray){
+	Mat flow, cflow;
 	cvtColor(frame, gray, CV_BGR2GRAY);
 	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
 
 	if (prevgray.data)
 	{
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0);
-		cvtColor(prevgray, cflow, CV_GRAY2BGR);
-		drawOptFlowMap(flow, cflow, 15, 1.5, CV_RGB(0, 0, 255));
-		imshow("flow", cflow);
+		drawOptFlowMap(flow, frame, 15, 1.5, CV_RGB(0, 0, 255));
 	}
 	swap(prevgray, gray);
 }
@@ -280,7 +330,7 @@ void getTexture(Mat &frame, vector<Point> allPoints)
 
 
 	Point faceContourPoints[1][25];
-	for (int i = 0; i < countourPoints.size(); i++)
+	for (unsigned int i = 0; i < countourPoints.size(); i++)
 		faceContourPoints[0][i] = countourPoints.at(i);
 
 	faceContourPoints[0][19] = Point(0, 0);
@@ -309,12 +359,12 @@ int main(int argc, char* argv[])
 			frameNums.push_back(atoi(argv[i]));
 	}
 
-	writeFramesFromVideo(frames, frameNums, "./Dim.mp4", 270);
+	writeFramesFromVideo(frames, frameNums, "./Dim.mp4", 0);
+
 	calculationASM(frames, facesKeyPoints, faceFrameInfo);
 
-
 	fstream resultCoords("./result.txt");
-	VideoWriter writer("./video.avi", 0, 15, faceFrameInfo.maxSize, true);
+	VideoWriter writer("./video_result.avi", 0, 15, faceFrameInfo.maxSize, true);
 
 	if (!writer.isOpened())
 	{
@@ -322,12 +372,18 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	for (int i = 0; i < facesKeyPoints.size(); i++)
+	Mat prevgray, gray;
+
+	for (unsigned int i = 0; i < facesKeyPoints.size(); i++)
 	{
-		
+
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
-		getTexture(frames[i], facesKeyPoints.at(i));
-		framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+
+		//framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+
+		//impositionOptFlow(frames[i], prevgray, gray);
+
+		//getTexture(frames[i], facesKeyPoints.at(i));
 
 		if (frameNums.size() != 0)
 		{
@@ -338,9 +394,9 @@ int main(int argc, char* argv[])
 			resultCoords << "frame " << frameNums.at(i) << ":" << endl;
 			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
 
-			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
+			for (unsigned int p = 0; p < facesKeyPoints.at(i).size(); p++)
 				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.maxSize.width / 2 << " " << facesKeyPoints.at(i).at(p).y - faceFrameInfo.maxSize.height / 2 << endl;
-			
+
 			resultCoords << endl;
 		}
 
