@@ -138,8 +138,6 @@ void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point s
 }
 
 void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceSize, Point2f &thisCenter){
-	//doesn not work if the ROI is beyond the border of the max size
-
 	if (thisCenter.x < 0 || thisCenter.y < 0){
 		Mat nullFrame(maxFaceSize.height, maxFaceSize.width, frame.type());
 		nullFrame.copyTo(frame);
@@ -379,7 +377,7 @@ int main(int argc, char* argv[])
 
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
 
-		//framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+		framePointsÑoloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
 
 		//impositionOptFlow(frames[i], prevgray, gray);
 
