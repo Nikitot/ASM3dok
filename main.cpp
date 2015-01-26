@@ -20,98 +20,8 @@ struct FaceFramesInfo
 {
 	Size maxSize = Size(0, 0);
 	int anfasFrame = -1;
-	vector<Point2f> thisCenter;
+	Point2f thisCenter;
 };
-
-void draw_subdiv(Mat &img, Subdiv2D& subdiv, Scalar delaunay_color)
-{
-	int rows = img.rows;
-	int cols = img.cols;
-
-	cv::Size s = img.size();
-	rows = s.height;
-	cols = s.width;
-
-	bool draw;
-	vector<Vec6f> triangleList;
-	subdiv.getTriangleList(triangleList);
-	vector<Point> pt(3);
-
-	for (size_t i = 0; i < triangleList.size(); ++i)
-	{
-		Vec6f t = triangleList[i];
-
-		pt[0] = Point(cvRound(t[0]), cvRound(t[1]));
-		pt[1] = Point(cvRound(t[2]), cvRound(t[3]));
-		pt[2] = Point(cvRound(t[4]), cvRound(t[5]));
-
-		draw = true;
-
-		for (int i = 0; i < 3; i++){
-			//cout << pt[i].x << " " << pt[i].y << endl;
-			if (pt[i].x >= cols || pt[i].y >= rows || pt[i].x <= 0 || pt[i].y <= 0)
-				draw = false;
-		}
-		if (draw){
-			line(img, pt[0], pt[1], delaunay_color, 1);
-			line(img, pt[1], pt[2], delaunay_color, 1);
-			line(img, pt[2], pt[0], delaunay_color, 1);
-		}
-
-	}
-}
-
-void writeAndRotateImage(Mat &frame, int angle, vector <Mat> &frames){
-
-	Mat writingFrame(frame.cols, frame.rows, frame.type());
-	if (angle){
-		Point2f src_center;
-		if (angle == 90)
-			src_center = Point(frame.cols / 2, frame.cols / 2);
-		else if (angle == 270)
-			src_center = Point(frame.rows / 2, frame.rows / 2);
-		else
-			src_center = Point(frame.cols / 2, frame.rows / 2);
-
-		Mat rot_mat = getRotationMatrix2D(src_center, angle, 1);
-		warpAffine(frame, writingFrame, rot_mat, writingFrame.size());
-	}
-	else{
-		frame.copyTo(writingFrame);
-	}
-	frames.push_back(writingFrame);
-
-	imshow("writing video", writingFrame);
-}
-
-void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* path){
-	int warp = 0;
-
-	//VideoCapture cap(path);
-	VideoCapture cap(0);
-	if (!cap.isOpened())  // check if we succeeded
-		return;
-
-	int frameIt = 0;
-	while (1){
-		Mat frame;
-		cap >> frame;
-		if (cvWaitKey(33) == 27 || !cap.read(frame)) break;
-
-		if (!frameNums.empty()){
-			for (size_t i = 0; i < frameNums.size(); i++)
-			if (frameNums.at(i) == frameIt)
-				writeAndRotateImage(frame, warp, frames);
-		}
-		else{
-			writeAndRotateImage(frame, warp, frames);
-		}
-		frameIt++;
-	}
-	destroyAllWindows();
-	cap.release();
-
-}
 
 void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
 	Point2f srcTri[3], dstTri[3];
@@ -209,60 +119,57 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 }
 
 //return max size for scaling result face
-void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, FaceFramesInfo &faceFrameInfo){
+void calculationASM(Mat &frame, vector<Point> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
+	
 	Mat_<unsigned char> img;
+	vector<Point> faceKeyPoints;
 
-	for (unsigned int f = 0; f < frames.size(); f++){
-		cvtColor(frames[f], img, CV_RGB2GRAY);
-		int foundface;
-		float landmarks[2 * stasm_NLANDMARKS]; // x,y coords (note the 2)
+	cvtColor(frame, img, CV_RGB2GRAY);
+	int foundface;
+	float landmarks[2 * stasm_NLANDMARKS]; // x,y coords (note the 2)
 
-		if (!stasm_search_single(&foundface, landmarks, (const char*)img.data, img.cols, img.rows, NULL, "./data"))
-		{
-			printf("Error in stasm_search_single: %s\n", stasm_lasterr());
-			exit(1);
-		}
-
-		vector<Point> facePoints;
-		double percent = ((double)f / (double)frames.size()) * 100;
-		Point2f thisCenter(-1, -1);
-
-		if (foundface)
-		{
-			// draw the landmarks on the image as white dots (image is monochrome)
-			//stasm_force_points_into_image(landmarks, img.cols, img.rows);
-
-			for (int i = 0; i < stasm_NLANDMARKS; i++){
-				string text = to_string(i);
-				Point facePoint(landmarks[i * 2], landmarks[i * 2 + 1]);
-				facePoints.push_back(facePoint);
-			}
-
-			int width = pow(pow((facePoints.at(12).x - facePoints.at(0).x), 2) + pow((facePoints.at(12).y - facePoints.at(0).y), 2), 0.5);
-			int height = pow(pow((facePoints.at(6).x - facePoints.at(14).x), 2) + pow((facePoints.at(6).y - facePoints.at(14).y), 2), 0.5);
-
-			thisCenter = Point2f(
-				(float)(facePoints.at(34).x + facePoints.at(44).x + facePoints.at(67).x) / 3.0f
-				, (float)(facePoints.at(34).y + facePoints.at(44).y + facePoints.at(67).y) / 3.0f);
-
-
-			if (width >= faceFrameInfo.maxSize.width && height >= faceFrameInfo.maxSize.height)
-				faceFrameInfo.maxSize = Size(width, height);
-			printf("Calculating: %.0f%%, face found\n", percent);
-
-		}
-		else
-		{
-			for (int i = 0; i < 77; i++)
-				facePoints.push_back(Point(-1, -1));
-			printf("Calculating: %.0f %%, face not found\n", percent);
-		}
-		facesKeyPoints.push_back(facePoints);
-		faceFrameInfo.thisCenter.push_back(thisCenter);
+	if (!stasm_search_single(&foundface, landmarks, (const char*)img.data, img.cols, img.rows, NULL, "./data"))
+	{
+		printf("Error in stasm_search_single: %s\n", stasm_lasterr());
+		exit(1);
 	}
+
+	Point2f thisCenter(-1, -1);
+
+	if (foundface)
+	{
+		// draw the landmarks on the image as white dots (image is monochrome)
+		//stasm_force_points_into_image(landmarks, img.cols, img.rows);
+
+		for (int i = 0; i < stasm_NLANDMARKS; i++){
+			string text = to_string(i);
+			Point facePoint(landmarks[i * 2], landmarks[i * 2 + 1]);
+			faceKeyPoints.push_back(facePoint);
+		}
+
+		int width = pow(pow((faceKeyPoints.at(12).x - faceKeyPoints.at(0).x), 2) + pow((faceKeyPoints.at(12).y - faceKeyPoints.at(0).y), 2), 0.5);
+		int height = pow(pow((faceKeyPoints.at(6).x - faceKeyPoints.at(14).x), 2) + pow((faceKeyPoints.at(6).y - faceKeyPoints.at(14).y), 2), 0.5);
+
+		thisCenter = Point2f(
+			(float)(faceKeyPoints.at(34).x + faceKeyPoints.at(44).x + faceKeyPoints.at(67).x) / 3.0f
+			, (float)(faceKeyPoints.at(34).y + faceKeyPoints.at(44).y + faceKeyPoints.at(67).y) / 3.0f);
+
+
+		if (width >= faceFrameInfo.maxSize.width && height >= faceFrameInfo.maxSize.height)
+			faceFrameInfo.maxSize = Size(width, height);
+
+	}
+	else
+	{
+		for (int i = 0; i < 77; i++)
+			faceKeyPoints.push_back(Point(-1, -1));
+	}
+	faceFrameInfo.thisCenter = thisCenter;
 
 	faceFrameInfo.maxSize.width += faceFrameInfo.maxSize.width / 4;
 	faceFrameInfo.maxSize.height += faceFrameInfo.maxSize.height / 4;
+
+	prevFaceKeyPoints = faceKeyPoints;
 }
 
 void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, int numFrame){
@@ -287,41 +194,43 @@ void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
-void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> allPoints, int step, double scale, const Scalar& color)
+void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> &faceKeyPoints, int step, double scale, const Scalar& color)
 {
-	for (unsigned int i = 0; i < allPoints.size(); i++){
+	for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
 
 		//float d = (float) allPoints.at(i).x / step
 
-		int x = allPoints.at(i).x / (step * 2); 
-		int y = allPoints.at(i).y / (step * 2);
+		int x = faceKeyPoints.at(i).x / (step * 2);
+		int y = faceKeyPoints.at(i).y / (step * 2);
 
 		x *= step;
 		y *= step;
-
-
+		
 		const Point2f& fxy = flow.at<Point2f>(y, x);
 
 		Point p1(x, y);
 		Point p2(round(x + fxy.x), round(y + fxy.y));
 
 		line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
+
+		faceKeyPoints.at(i) = Point(p2.x * 2, p2.y * 2);
+
 	}
 
 	/*for (int y = 0; y < flow.rows/step; y++ ){
-		for (int x = 0; x < flow.cols/step; x++ )
-		{
-			const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
+	for (int x = 0; x < flow.cols/step; x++ )
+	{
+	const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
 
-			Point p1(x*step, y*step);
-			Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
+	Point p1(x*step, y*step);
+	Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
 
-			line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
-		}
+	line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
+	}
 	}*/
 }
 
-void impositionOptFlow(Mat &frame, vector<Point> allPoints, Mat &prevgray, Mat &gray){
+void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat &prevgray){
 	Mat flow, cflow;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
@@ -329,7 +238,7 @@ void impositionOptFlow(Mat &frame, vector<Point> allPoints, Mat &prevgray, Mat &
 	if (prevgray.data)
 	{
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0);
-		drawOptFlowMap(flow, frame, allPoints, 2, 1.5, CV_RGB(0, 0, 255));
+		drawOptFlowMap(flow, frame, faceKeyPoints, 1, 1.5, CV_RGB(0, 0, 255));
 	}
 	swap(prevgray, gray);
 }
@@ -385,22 +294,11 @@ void getTexture(Mat &frame, vector<Point> allPoints)
 
 int main(int argc, char* argv[])
 {
-	vector <int> frameNums;
-	vector <Mat> frames;
-	vector <vector <Point>> facesKeyPoints;
+	vector <Point> faceKeyPoints, prevFaceKeyPoints;
 	FaceFramesInfo faceFrameInfo;
+	Mat frame, prevgray, gray;
+	int it = 0;
 
-	if (argc > 1)
-	{
-		for (int i = 1; i < argc; i++)
-			frameNums.push_back(atoi(argv[i]));
-	}
-
-	writeFramesFromVideo(frames, frameNums, "./Dim.mp4");
-
-	calculationASM(frames, facesKeyPoints, faceFrameInfo);
-
-	fstream resultCoords("./result.txt");
 	VideoWriter writer("./video_result.avi", 0, 15, faceFrameInfo.maxSize, true);
 
 	if (!writer.isOpened())
@@ -409,43 +307,37 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	Mat prevgray, gray;
-
-	for (unsigned int i = 0; i < facesKeyPoints.size(); i++)
-	{
-
-		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
-
-		if (i>1 && facesKeyPoints.at(i - 1).at(0).x > 0){
-			impositionOptFlow(frames[i], facesKeyPoints.at(i - 1), prevgray, gray);
-		}
-
-		framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
-		//getTexture(frames[i], facesKeyPoints.at(i));
-
-		if (frameNums.size() != 0)
-		{
-			ostringstream fileName;
-			fileName << "./frame" << frameNums.at(i) << ".jpg";
-			imwrite(fileName.str(), frames[i]);
-
-			resultCoords << "frame " << frameNums.at(i) << ":" << endl;
-			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
-
-			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
-			{
-				
-				//if ( p == 34 || p == 44 || p == 52 || p == 59 || p == 65 || p == 1 || p == 11)
-					resultCoords << facesKeyPoints.at(i).at(p).x << " " << facesKeyPoints.at(i).at(p).y << endl;
-			}
-			resultCoords << endl;
-		}
-
-		imshow("ASM result", frames[i]);
-		writer.write(frames[i]);
-
-		if (waitKey(33)){}
+	VideoCapture cap(0);
+	if (!cap.isOpened()){
+		printf("Camera could not be opened");
+		return -1;
 	}
+
+
+	cap >> frame;
+	calculationASM(frame, faceKeyPoints, faceFrameInfo);
+
+	while (1){
+		if (waitKey(33) == 27)	break;
+		cap >> frame;
+		if (waitKey(33) == 13){
+			calculationASM(frame, faceKeyPoints, faceFrameInfo);
+		}
+		//facePointsStabilisation(frame, faceKeyPoints, faceFrameInfo.maxSize, faceFrameInfo.thisCenter);
+
+		if (it>1 && faceKeyPoints.at(0).x > 0){
+			impositionOptFlow(frame, faceKeyPoints, prevgray, gray);
+		}
+		framePoints—oloring(frame, faceKeyPoints, faceFrameInfo.thisCenter,0);
+
+		imshow("ASM result", frame);
+		writer.write(frame);
+		it++;
+
+	}
+
+	writer.release();
+	destroyAllWindows();
 
 	return 0;
 }
