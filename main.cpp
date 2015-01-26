@@ -230,7 +230,7 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 		if (foundface)
 		{
 			// draw the landmarks on the image as white dots (image is monochrome)
-			stasm_force_points_into_image(landmarks, img.cols, img.rows);
+			//stasm_force_points_into_image(landmarks, img.cols, img.rows);
 
 			for (int i = 0; i < stasm_NLANDMARKS; i++){
 				string text = to_string(i);
@@ -287,45 +287,49 @@ void framePointsÑoloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
-void drawOptFlowMap(const Mat& flow, Mat& frame, int step, double scale, const Scalar& color)
+void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> allPoints, int step, double scale, const Scalar& color)
 {
-	int x, y;
-	for (y = 0; y < flow.rows; y += step){
-		for (x = 0; x < flow.cols; x += step)
-		{
-			const Point2f& fxy = flow.at<Point2f>(y, x);
+	for (unsigned int i = 0; i < allPoints.size(); i++){
 
-			Point p1(x, y);
-			Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
+		//float d = (float) allPoints.at(i).x / step
+
+		int x = allPoints.at(i).x / (step * 2); 
+		int y = allPoints.at(i).y / (step * 2);
+
+		x *= step;
+		y *= step;
+
+
+		const Point2f& fxy = flow.at<Point2f>(y, x);
+
+		Point p1(x, y);
+		Point p2(round(x + fxy.x), round(y + fxy.y));
+
+		line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
+	}
+
+	/*for (int y = 0; y < flow.rows/step; y++ ){
+		for (int x = 0; x < flow.cols/step; x++ )
+		{
+			const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
+
+			Point p1(x*step, y*step);
+			Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
 
 			line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
 		}
-	}
+	}*/
 }
 
-void impositionOptFlow(Mat &frame, vector<Point> old_features, Mat &prevgray, Mat &gray){
+void impositionOptFlow(Mat &frame, vector<Point> allPoints, Mat &prevgray, Mat &gray){
 	Mat flow, cflow;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
-	//vector<uchar> status;
-	//vector<float> error;
-	//vector<Point2f> found;
-	//vector<Point2f> frameFeatures;
-	//Size subPixWinSize(10, 10);
-	//TermCriteria termcrit(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 77, 0.03);
 
 	if (prevgray.data)
 	{
-		//goodFeaturesToTrack(gray, frameFeatures, 1000, 0.001, 20);
-		//cornerSubPix(gray, frameFeatures, subPixWinSize, Size(-1, -1), termcrit);
-		//calcOpticalFlowPyrLK(prevgray, gray, frameFeatures, found, status, error);
-
-		//for (unsigned int i = 0; i < found.size(); i++){
-		//	circle(frame, found.at(i),1,CV_RGB(0,255,0),3,8,0);
-		//}
-
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0);
-		drawOptFlowMap(flow, frame, 5, 1.5, CV_RGB(0, 0, 255));
+		drawOptFlowMap(flow, frame, allPoints, 2, 1.5, CV_RGB(0, 0, 255));
 	}
 	swap(prevgray, gray);
 }
@@ -428,9 +432,12 @@ int main(int argc, char* argv[])
 			resultCoords << "frame " << frameNums.at(i) << ":" << endl;
 			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
 
-			for (unsigned int p = 0; p < facesKeyPoints.at(i).size(); p++)
-				resultCoords << facesKeyPoints.at(i).at(p).x - faceFrameInfo.maxSize.width / 2 << " " << facesKeyPoints.at(i).at(p).y - faceFrameInfo.maxSize.height / 2 << endl;
-
+			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
+			{
+				
+				//if ( p == 34 || p == 44 || p == 52 || p == 59 || p == 65 || p == 1 || p == 11)
+					resultCoords << facesKeyPoints.at(i).at(p).x << " " << facesKeyPoints.at(i).at(p).y << endl;
+			}
 			resultCoords << endl;
 		}
 
