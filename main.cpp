@@ -84,7 +84,8 @@ void writeAndRotateImage(Mat &frame, int angle, vector <Mat> &frames){
 	imshow("writing video", writingFrame);
 }
 
-void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* path, int warp){
+void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* path){
+	int warp = 0;
 
 	//VideoCapture cap(path);
 	VideoCapture cap(0);
@@ -113,8 +114,6 @@ void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* pat
 }
 
 void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
-
-
 	Point2f srcTri[3], dstTri[3];
 	Mat warp_mat = Mat(2, 3, CV_32FC1);
 	Mat dst = frame.clone();
@@ -149,7 +148,7 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 	int rect_width = maxFaceSize.width;
 	int rect_height = maxFaceSize.height;
 
-	bool capable_displacement[2] = { true , true };
+	bool capable_displacement[2] = { true, true };
 
 	if (rect_x + rect_width >= frame.cols){
 		shiftImageAndPointsFromBorder(frame, allPoints, Point(-(rect_x + rect_width - frame.cols), 0));
@@ -164,11 +163,11 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 	if (rect_x <= 0 && capable_displacement[0])
 	{
 		shiftImageAndPointsFromBorder(frame, allPoints, Point(-rect_x, 0));
-		thisCenter.x += -rect_x;		
+		thisCenter.x += -rect_x;
 	}
 	if (rect_y <= 0 && capable_displacement[1]){
 		shiftImageAndPointsFromBorder(frame, allPoints, Point(0, -rect_y));
-		thisCenter.y += -rect_y;		
+		thisCenter.y += -rect_y;
 	}
 
 
@@ -182,10 +181,10 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 	Mat rot_mat = getRotationMatrix2D(thisCenter, angle*57.3, 1);
 	warpAffine(frame, stableFrame, rot_mat, frame.size());
 
-	imshow("goodframe", stableFrame);
-	waitKey(0);
+	//imshow("goodframe", stableFrame);
+	//waitKey(0);
 
-	
+
 	Rect region_of_interest = Rect(thisCenter.x - maxFaceSize.width / 2, thisCenter.y - maxFaceSize.height / 2, maxFaceSize.width, maxFaceSize.height);
 	if (region_of_interest.x >= 0 && region_of_interest.y >= 0){
 
@@ -198,7 +197,7 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 			allPoints.at(i).y = (newP.x * sin(-angle) + newP.y * cos(-angle)) + maxFaceSize.height / 2;
 		}
 	}
-	else 
+	else
 	{
 		Mat nullFrame(maxFaceSize.height, maxFaceSize.width, frame.type());
 		for (unsigned int i = 0; i < allPoints.size(); i++)
@@ -206,7 +205,7 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 		nullFrame.copyTo(frame);
 		return;
 	}
-	
+
 }
 
 //return max size for scaling result face
@@ -285,7 +284,7 @@ void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 
 	stringstream text;
 	text << numFrame;
-	putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
+	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
 void drawOptFlowMap(const Mat& flow, Mat& frame, int step, double scale, const Scalar& color)
@@ -304,15 +303,51 @@ void drawOptFlowMap(const Mat& flow, Mat& frame, int step, double scale, const S
 	}
 }
 
-void impositionOptFlow(Mat &frame, Mat &prevgray, Mat &gray){
+void impositionOptFlow(Mat &frame, vector<Point> old_features, Mat &prevgray, Mat &gray){
 	Mat flow, cflow;
-	cvtColor(frame, gray, CV_BGR2GRAY);
+	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
+	//vector<uchar> status;
+	//vector<float> error;
+	//vector<Point2f> found;
+	//vector<Point2f> frameFeatures;
+	//Size subPixWinSize(10, 10);
+	//TermCriteria termcrit(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 77, 0.03);
 
 	if (prevgray.data)
 	{
+		//goodFeaturesToTrack(gray, frameFeatures, 1000, 0.001, 20);
+		//cornerSubPix(gray, frameFeatures, subPixWinSize, Size(-1, -1), termcrit);
+		//calcOpticalFlowPyrLK(prevgray, gray, frameFeatures, found, status, error);
+
+		//for (unsigned int i = 0; i < found.size(); i++){
+		//	circle(frame, found.at(i),1,CV_RGB(0,255,0),3,8,0);
+		//}
+
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0);
-		drawOptFlowMap(flow, frame, 15, 1.5, CV_RGB(0, 0, 255));
+		drawOptFlowMap(flow, frame, 5, 1.5, CV_RGB(0, 0, 255));
+	}
+	swap(prevgray, gray);
+}
+
+void impositionOptFlowLK(Mat &frame, vector<Point> old_features, Mat &prevgray, Mat &gray, int cornersCount){
+	cvtColor(frame, gray, COLOR_BGR2GRAY);
+	vector<uchar> status;
+	vector<float> error;
+	vector<Point2f> found;
+	vector<Point2f> frameFeatures;
+	Size subPixWinSize(10, 10);
+	TermCriteria termcrit(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, cornersCount, 0.03);
+
+	if (prevgray.data)
+	{
+		goodFeaturesToTrack(gray, frameFeatures, cornersCount, 0.001, 20);
+		cornerSubPix(gray, frameFeatures, subPixWinSize, Size(-1, -1), termcrit);
+		calcOpticalFlowPyrLK(prevgray, gray, frameFeatures, found, status, error);
+
+		for (unsigned int i = 0; i < found.size(); i++){
+			circle(frame, found.at(i), 1, CV_RGB(0, 255, 0), 3, 8, 0);
+		}
 	}
 	swap(prevgray, gray);
 }
@@ -357,7 +392,7 @@ int main(int argc, char* argv[])
 			frameNums.push_back(atoi(argv[i]));
 	}
 
-	writeFramesFromVideo(frames, frameNums, "./Dim.mp4", 0);
+	writeFramesFromVideo(frames, frameNums, "./Dim.mp4");
 
 	calculationASM(frames, facesKeyPoints, faceFrameInfo);
 
@@ -377,10 +412,11 @@ int main(int argc, char* argv[])
 
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
 
+		if (i>1 && facesKeyPoints.at(i - 1).at(0).x > 0){
+			impositionOptFlow(frames[i], facesKeyPoints.at(i - 1), prevgray, gray);
+		}
+
 		framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
-
-		//impositionOptFlow(frames[i], prevgray, gray);
-
 		//getTexture(frames[i], facesKeyPoints.at(i));
 
 		if (frameNums.size() != 0)
