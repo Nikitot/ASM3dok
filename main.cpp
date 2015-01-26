@@ -299,14 +299,6 @@ int main(int argc, char* argv[])
 	Mat frame, prevgray, gray;
 	int it = 0;
 
-	VideoWriter writer("./video_result.avi", 0, 15, faceFrameInfo.maxSize, true);
-
-	if (!writer.isOpened())
-	{
-		printf("Output video could not be opened");
-		return -1;
-	}
-
 	VideoCapture cap(0);
 	if (!cap.isOpened()){
 		printf("Camera could not be opened");
@@ -316,6 +308,14 @@ int main(int argc, char* argv[])
 
 	cap >> frame;
 	calculationASM(frame, faceKeyPoints, faceFrameInfo);
+
+	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
+
+	if (!writer.isOpened())
+	{
+		printf("Output video could not be opened");
+		return -1;
+	}
 
 	while (1){
 		if (waitKey(33) == 27)	break;
@@ -336,7 +336,6 @@ int main(int argc, char* argv[])
 
 	}
 
-	writer.release();
 	destroyAllWindows();
 
 	return 0;
