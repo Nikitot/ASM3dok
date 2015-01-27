@@ -25,10 +25,10 @@ struct FaceFramesInfo
 
 struct OptFlowLKParams{
 	Size winSize = Size(31, 31);
-	int maxLevel = 3;
+	int maxLevel = 20;
 	TermCriteria termCrit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
-	int derivLamda = 0;
-	int LKflags = 0;
+	int derivLamda = 2;
+	int LKflags = 2;
 	double minEigThreshold = 0.001;
 };
 
@@ -128,10 +128,10 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 }
 
 //return max size for scaling result face
-void calculationASM(Mat &frame, vector<Point> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
+void calculationASM(Mat &frame, vector<Point2f> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
 	
 	Mat_<unsigned char> img;
-	vector<Point> faceKeyPoints;
+	vector<Point2f> faceKeyPoints;
 
 	cvtColor(frame, img, CV_RGB2GRAY);
 	int foundface;
@@ -181,7 +181,7 @@ void calculationASM(Mat &frame, vector<Point> &prevFaceKeyPoints, FaceFramesInfo
 	prevFaceKeyPoints = faceKeyPoints;
 }
 
-void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, int numFrame){
+void framePoints—oloring(Mat &frame, vector <Point2f> &keyPoints){
 	for (unsigned int p = 0; p < keyPoints.size(); p++){
 		circle(frame, keyPoints.at(p), 1, Scalar(255, 128, 128), 2);
 	}
@@ -196,10 +196,7 @@ void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 	Point crossLine = ((keyPoints.at(0).x + keyPoints.at(12).x) / 2, (keyPoints.at(14).y + keyPoints.at(6).y) / 2);
 
 	circle(frame, crossLine, 1, Scalar(0, 0, 255), 2);
-	circle(frame, center, 1, Scalar(128, 255, 128), 2);
 
-	stringstream text;
-	text << numFrame;
 	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
@@ -261,14 +258,13 @@ void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat 
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(Mat &frame, vector<Point2f> old_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
+void impositionOptFlowLK(Mat &frame, vector<Point2f> &old_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
 
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	vector<uchar> status;
 	vector<float> error;
 	vector<Point2f> found;
 	vector<Point2f> frameFeatures;
-	Size subPixWinSize(31, 31);
 
 	if (prevgray.data)
 	{		
@@ -276,7 +272,7 @@ void impositionOptFlowLK(Mat &frame, vector<Point2f> old_features, Mat &prevgray
 		calcOpticalFlowPyrLK(prevgray, gray, old_features, found, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
 
 		for (unsigned int i = 0; i < found.size(); i++){
-			circle(frame, found.at(i), 1, CV_RGB(0, 255, 0), 3, 8, 0);
+			circle(frame, found.at(i), 1, CV_RGB(255, 255, 255), 3, 8, 0);
 			old_features.at(i) = found.at(i);
 		}
 	}
@@ -323,17 +319,35 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-
 	cap >> frame;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.001, 20);
+	goodFeaturesToTrack(gray, faceKeyPoints, 200, 0.01, 20);
+
 	while (1){
 		if (waitKey(33) == 27)	break;
+		
 		cap >> frame;
 
-		if (faceKeyPoints.at(0).x > 0){
-			impositionOptFlowLK(frame, faceKeyPoints, prevgray,gray, 100, optFlowLKParams);
+		if (waitKey(33) == 13){
+
+			calculationASM(frame, faceKeyPoints, faceFrameInfo);
+
+
+			Rect rect_roi = Rect(faceKeyPoints.at(18).x, faceKeyPoints.at(17).y, faceKeyPoints.at(44).x - faceKeyPoints.at(18).x, faceKeyPoints.at(74).y - faceKeyPoints.at(17).y);
+			Mat roi = frame(rect_roi);
+			roi.copyTo(gray);
+			cvtColor(gray, gray, COLOR_BGR2GRAY);
+			goodFeaturesToTrack(gray, faceKeyPoints, 200, 0.01, 20);
+			for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
+				faceKeyPoints.at(i) = Point2f(faceKeyPoints.at(i).x + rect_roi.x, faceKeyPoints.at(i).y + rect_roi.y);
+			}
 		}
+
+		if (faceKeyPoints.at(0).x > 0){
+			impositionOptFlowLK(frame, faceKeyPoints, prevgray,gray, 200, optFlowLKParams);
+		}
+		//framePoints—oloring(frame, faceKeyPoints);
+
 		imshow("OFLK result", frame);
 	}
 
