@@ -23,6 +23,15 @@ struct FaceFramesInfo
 	Point2f thisCenter;
 };
 
+struct OptFlowLKParams{
+	Size winSize = Size(31, 31);
+	int maxLevel = 3;
+	TermCriteria termCrit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
+	int derivLamda = 0;
+	int LKflags = 0;
+	double minEigThreshold = 0.001;
+};
+
 void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
 	Point2f srcTri[3], dstTri[3];
 	Mat warp_mat = Mat(2, 3, CV_32FC1);
@@ -194,11 +203,31 @@ void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
-void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> &faceKeyPoints, int step, double scale, const Scalar& color)
+void drawOptFlowMap(Mat flow, Mat &frame, int step)
+{
+	for (int y = 0; y < flow.rows / step; y++){
+		for (int x = 0; x < flow.cols / step; x++)
+		{
+			const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
+
+			Point p1(x*step, y*step);
+			Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
+
+			//line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), CV_RGB(255, 255, 255));
+
+			float length_fxy = pow(pow(fxy.x, 2) + pow(fxy.y, 2), 0.5);
+			float length_xy = pow(pow(step, 2) + pow(step, 2), 0.5);
+
+			
+			float color = length_fxy * 20;
+			circle(frame, Point(p1.x * 2, p1.y * 2), 2, Scalar(int(color), int(color), int(color)));
+		}
+	}
+}
+
+void trackingFacePoints(const Mat& flow, Mat& frame, vector<Point> &faceKeyPoints, int step, const Scalar& color)
 {
 	for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
-
-		//float d = (float) allPoints.at(i).x / step
 
 		int x = faceKeyPoints.at(i).x / (step * 2);
 		int y = faceKeyPoints.at(i).y / (step * 2);
@@ -216,18 +245,6 @@ void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> &faceKeyPoints, i
 		faceKeyPoints.at(i) = Point(p2.x * 2, p2.y * 2);
 
 	}
-
-	/*for (int y = 0; y < flow.rows/step; y++ ){
-	for (int x = 0; x < flow.cols/step; x++ )
-	{
-	const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
-
-	Point p1(x*step, y*step);
-	Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
-
-	line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), color);
-	}
-	}*/
 }
 
 void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat &prevgray){
@@ -237,29 +254,30 @@ void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat 
 
 	if (prevgray.data)
 	{
-		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0);
-		drawOptFlowMap(flow, frame, faceKeyPoints, 1, 1.5, CV_RGB(0, 0, 255));
+		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 7, 10, 3, 7, 1.5, OPTFLOW_FARNEBACK_GAUSSIAN);
+		//trackingFacePoints(flow, frame, faceKeyPoints, 2, CV_RGB(0, 0, 255));
+		drawOptFlowMap(flow, frame,2);
 	}
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(Mat &frame, vector<Point> old_features, Mat &prevgray, Mat &gray, int cornersCount){
+void impositionOptFlowLK(Mat &frame, vector<Point2f> old_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
+
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	vector<uchar> status;
 	vector<float> error;
 	vector<Point2f> found;
 	vector<Point2f> frameFeatures;
-	Size subPixWinSize(10, 10);
-	TermCriteria termcrit(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, cornersCount, 0.03);
+	Size subPixWinSize(31, 31);
 
 	if (prevgray.data)
-	{
-		goodFeaturesToTrack(gray, frameFeatures, cornersCount, 0.001, 20);
-		cornerSubPix(gray, frameFeatures, subPixWinSize, Size(-1, -1), termcrit);
-		calcOpticalFlowPyrLK(prevgray, gray, frameFeatures, found, status, error);
+	{		
+		//cornerSubPix(gray, old_features, subPixWinSize, Size(-1, -1), termcrit);
+		calcOpticalFlowPyrLK(prevgray, gray, old_features, found, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
 
 		for (unsigned int i = 0; i < found.size(); i++){
 			circle(frame, found.at(i), 1, CV_RGB(0, 255, 0), 3, 8, 0);
+			old_features.at(i) = found.at(i);
 		}
 	}
 	swap(prevgray, gray);
@@ -294,10 +312,10 @@ void getTexture(Mat &frame, vector<Point> allPoints)
 
 int main(int argc, char* argv[])
 {
-	vector <Point> faceKeyPoints, prevFaceKeyPoints;
+	vector <Point2f> faceKeyPoints;
 	FaceFramesInfo faceFrameInfo;
 	Mat frame, prevgray, gray;
-	int it = 0;
+	OptFlowLKParams optFlowLKParams;
 
 	VideoCapture cap(0);
 	if (!cap.isOpened()){
@@ -307,33 +325,16 @@ int main(int argc, char* argv[])
 
 
 	cap >> frame;
-	calculationASM(frame, faceKeyPoints, faceFrameInfo);
-
-	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
-
-	if (!writer.isOpened())
-	{
-		printf("Output video could not be opened");
-		return -1;
-	}
-
+	cvtColor(frame, gray, COLOR_BGR2GRAY);
+	goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.001, 20);
 	while (1){
 		if (waitKey(33) == 27)	break;
 		cap >> frame;
-		if (waitKey(33) == 13){
-			calculationASM(frame, faceKeyPoints, faceFrameInfo);
+
+		if (faceKeyPoints.at(0).x > 0){
+			impositionOptFlowLK(frame, faceKeyPoints, prevgray,gray, 100, optFlowLKParams);
 		}
-		//facePointsStabilisation(frame, faceKeyPoints, faceFrameInfo.maxSize, faceFrameInfo.thisCenter);
-
-		if (it>1 && faceKeyPoints.at(0).x > 0){
-			impositionOptFlow(frame, faceKeyPoints, prevgray, gray);
-		}
-		framePoints—oloring(frame, faceKeyPoints, faceFrameInfo.thisCenter,0);
-
-		imshow("ASM result", frame);
-		writer.write(frame);
-		it++;
-
+		imshow("OFLK result", frame);
 	}
 
 	destroyAllWindows();
