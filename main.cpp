@@ -24,12 +24,12 @@ struct FaceFramesInfo
 };
 
 struct OptFlowLKParams{
-	Size winSize = Size(31, 31);
-	int maxLevel = 20;
+	Size winSize = Size(11, 11);
+	int maxLevel = 5;
 	TermCriteria termCrit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
 	int derivLamda = 2;
 	int LKflags = 2;
-	double minEigThreshold = 0.001;
+	double minEigThreshold = 0.01;
 };
 
 void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
@@ -272,8 +272,12 @@ void impositionOptFlowLK(Mat &frame, vector<Point2f> &old_features, Mat &prevgra
 		calcOpticalFlowPyrLK(prevgray, gray, old_features, found, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
 
 		for (unsigned int i = 0; i < found.size(); i++){
-			circle(frame, found.at(i), 1, CV_RGB(255, 255, 255), 3, 8, 0);
+			circle(frame, found.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
 			old_features.at(i) = found.at(i);
+
+			//char c_err[128];
+			//sprintf(c_err,"%.1f", error.at(i));
+			//putText(frame, c_err, found.at(i),1,1,CV_RGB(255,255,255));
 		}
 	}
 	swap(prevgray, gray);
@@ -321,7 +325,7 @@ int main(int argc, char* argv[])
 
 	cap >> frame;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, faceKeyPoints, 200, 0.01, 20);
+	goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.05, 10, Mat(), 5, 1, 0.05);
 
 	while (1){
 		if (waitKey(33) == 27)	break;
@@ -331,22 +335,22 @@ int main(int argc, char* argv[])
 		if (waitKey(33) == 13){
 
 			calculationASM(frame, faceKeyPoints, faceFrameInfo);
-
-
-			Rect rect_roi = Rect(faceKeyPoints.at(18).x, faceKeyPoints.at(17).y, faceKeyPoints.at(44).x - faceKeyPoints.at(18).x, faceKeyPoints.at(74).y - faceKeyPoints.at(17).y);
-			Mat roi = frame(rect_roi);
-			roi.copyTo(gray);
-			cvtColor(gray, gray, COLOR_BGR2GRAY);
-			goodFeaturesToTrack(gray, faceKeyPoints, 200, 0.01, 20);
-			for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
-				faceKeyPoints.at(i) = Point2f(faceKeyPoints.at(i).x + rect_roi.x, faceKeyPoints.at(i).y + rect_roi.y);
+			if (faceKeyPoints.at(0).x >= 0){
+				Rect rect_roi = Rect(faceKeyPoints.at(18).x, faceKeyPoints.at(17).y, faceKeyPoints.at(44).x - faceKeyPoints.at(18).x, faceKeyPoints.at(74).y - faceKeyPoints.at(17).y);
+				Mat roi = frame(rect_roi);
+				roi.copyTo(gray);
+				cvtColor(gray, gray, COLOR_BGR2GRAY);
+				goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.05, 5, Mat(),1,1,0.05);
+				for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
+					faceKeyPoints.at(i) = Point2f(faceKeyPoints.at(i).x + rect_roi.x, faceKeyPoints.at(i).y + rect_roi.y);
+				}
 			}
+			
 		}
 
 		if (faceKeyPoints.at(0).x > 0){
 			impositionOptFlowLK(frame, faceKeyPoints, prevgray,gray, 200, optFlowLKParams);
 		}
-		//framePoints—oloring(frame, faceKeyPoints);
 
 		imshow("OFLK result", frame);
 	}
