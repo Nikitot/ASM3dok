@@ -23,44 +23,6 @@ struct FaceFramesInfo
 	vector<Point2f> thisCenter;
 };
 
-void draw_subdiv(Mat &img, Subdiv2D& subdiv, Scalar delaunay_color)
-{
-	int rows = img.rows;
-	int cols = img.cols;
-
-	cv::Size s = img.size();
-	rows = s.height;
-	cols = s.width;
-
-	bool draw;
-	vector<Vec6f> triangleList;
-	subdiv.getTriangleList(triangleList);
-	vector<Point> pt(3);
-
-	for (size_t i = 0; i < triangleList.size(); ++i)
-	{
-		Vec6f t = triangleList[i];
-
-		pt[0] = Point(cvRound(t[0]), cvRound(t[1]));
-		pt[1] = Point(cvRound(t[2]), cvRound(t[3]));
-		pt[2] = Point(cvRound(t[4]), cvRound(t[5]));
-
-		draw = true;
-
-		for (int i = 0; i < 3; i++){
-			//cout << pt[i].x << " " << pt[i].y << endl;
-			if (pt[i].x >= cols || pt[i].y >= rows || pt[i].x <= 0 || pt[i].y <= 0)
-				draw = false;
-		}
-		if (draw){
-			line(img, pt[0], pt[1], delaunay_color, 1);
-			line(img, pt[1], pt[2], delaunay_color, 1);
-			line(img, pt[2], pt[0], delaunay_color, 1);
-		}
-
-	}
-}
-
 void writeAndRotateImage(Mat &frame, int angle, vector <Mat> &frames){
 
 	Mat writingFrame(frame.cols, frame.rows, frame.type());
@@ -85,10 +47,10 @@ void writeAndRotateImage(Mat &frame, int angle, vector <Mat> &frames){
 }
 
 void writeFramesFromVideo(vector <Mat> &frames, vector<int> frameNums, char* path){
-	int warp = 0;
+	int warp = 90;
 
-	//VideoCapture cap(path);
-	VideoCapture cap(0);
+	VideoCapture cap(path);
+	//VideoCapture cap(0);
 	if (!cap.isOpened())  // check if we succeeded
 		return;
 
@@ -247,7 +209,7 @@ void calculationASM(vector<Mat> &frames, vector<vector<Point>> &facesKeyPoints, 
 
 
 			if (width >= faceFrameInfo.maxSize.width && height >= faceFrameInfo.maxSize.height)
-				faceFrameInfo.maxSize = Size(width, height);
+				faceFrameInfo.maxSize = Size(height, height);		//for Rect
 			printf("Calculating: %.0f%%, face found\n", percent);
 
 		}
@@ -284,7 +246,7 @@ void framePoints—oloring(Mat &frame, vector <Point> &keyPoints, Point center, in
 
 	stringstream text;
 	text << numFrame;
-	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
+	putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
 }
 
 void drawOptFlowMap(const Mat& flow, Mat& frame, vector<Point> allPoints, int step, double scale, const Scalar& color)
@@ -334,28 +296,6 @@ void impositionOptFlow(Mat &frame, vector<Point> allPoints, Mat &prevgray, Mat &
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(Mat &frame, vector<Point> old_features, Mat &prevgray, Mat &gray, int cornersCount){
-	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	vector<uchar> status;
-	vector<float> error;
-	vector<Point2f> found;
-	vector<Point2f> frameFeatures;
-	Size subPixWinSize(10, 10);
-	TermCriteria termcrit(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, cornersCount, 0.03);
-
-	if (prevgray.data)
-	{
-		goodFeaturesToTrack(gray, frameFeatures, cornersCount, 0.001, 20);
-		cornerSubPix(gray, frameFeatures, subPixWinSize, Size(-1, -1), termcrit);
-		calcOpticalFlowPyrLK(prevgray, gray, frameFeatures, found, status, error);
-
-		for (unsigned int i = 0; i < found.size(); i++){
-			circle(frame, found.at(i), 1, CV_RGB(0, 255, 0), 3, 8, 0);
-		}
-	}
-	swap(prevgray, gray);
-}
-
 void getTexture(Mat &frame, vector<Point> allPoints)
 {
 	vector<Point> countourPoints;
@@ -396,7 +336,7 @@ int main(int argc, char* argv[])
 			frameNums.push_back(atoi(argv[i]));
 	}
 
-	writeFramesFromVideo(frames, frameNums, "./Dim.mp4");
+	writeFramesFromVideo(frames, frameNums, "./Nik.mp4");
 
 	calculationASM(frames, facesKeyPoints, faceFrameInfo);
 
@@ -416,12 +356,14 @@ int main(int argc, char* argv[])
 
 		facePointsStabilisation(frames[i], facesKeyPoints.at(i), faceFrameInfo.maxSize, faceFrameInfo.thisCenter[i]);
 
-		if (i>1 && facesKeyPoints.at(i - 1).at(0).x > 0){
-			impositionOptFlow(frames[i], facesKeyPoints.at(i - 1), prevgray, gray);
-		}
+		//if (i>1 && facesKeyPoints.at(i - 1).at(0).x > 0){
+		//	impositionOptFlow(frames[i], facesKeyPoints.at(i - 1), prevgray, gray);
+		//}
 
-		framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
-		//getTexture(frames[i], facesKeyPoints.at(i));
+
+		getTexture(frames[i], facesKeyPoints.at(i));
+		//framePoints—oloring(frames[i], facesKeyPoints.at(i), faceFrameInfo.thisCenter[i], i);
+		
 
 		if (frameNums.size() != 0)
 		{
@@ -430,11 +372,10 @@ int main(int argc, char* argv[])
 			imwrite(fileName.str(), frames[i]);
 
 			resultCoords << "frame " << frameNums.at(i) << ":" << endl;
-			resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
+			//resultCoords << "center :" << faceFrameInfo.maxSize.width / 2 << " " << faceFrameInfo.maxSize.height / 2 << endl;
 
 			for (int p = 0; p < facesKeyPoints.at(i).size(); p++)
-			{
-				
+			{				
 				//if ( p == 34 || p == 44 || p == 52 || p == 59 || p == 65 || p == 1 || p == 11)
 					resultCoords << facesKeyPoints.at(i).at(p).x << " " << facesKeyPoints.at(i).at(p).y << endl;
 			}
