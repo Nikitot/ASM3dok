@@ -129,7 +129,7 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 
 //return max size for scaling result face
 void calculationASM(Mat &frame, vector<Point2f> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
-	
+
 	Mat_<unsigned char> img;
 	vector<Point2f> faceKeyPoints;
 
@@ -215,7 +215,7 @@ void drawOptFlowMap(Mat flow, Mat &frame, int step)
 			float length_fxy = pow(pow(fxy.x, 2) + pow(fxy.y, 2), 0.5);
 			float length_xy = pow(pow(step, 2) + pow(step, 2), 0.5);
 
-			
+
 			float color = length_fxy * 20;
 			circle(frame, Point(p1.x * 2, p1.y * 2), 2, Scalar(int(color), int(color), int(color)));
 		}
@@ -231,7 +231,7 @@ void trackingFacePoints(const Mat& flow, Mat& frame, vector<Point> &faceKeyPoint
 
 		x *= step;
 		y *= step;
-		
+
 		const Point2f& fxy = flow.at<Point2f>(y, x);
 
 		Point p1(x, y);
@@ -253,27 +253,27 @@ void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat 
 	{
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 7, 10, 3, 7, 1.5, OPTFLOW_FARNEBACK_GAUSSIAN);
 		//trackingFacePoints(flow, frame, faceKeyPoints, 2, CV_RGB(0, 0, 255));
-		drawOptFlowMap(flow, frame,2);
+		drawOptFlowMap(flow, frame, 2);
 	}
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(Mat &frame, vector<Point2f> &old_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
+void impositionOptFlowLK(Mat &frame, vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
 
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	vector<uchar> status;
 	vector<float> error;
-	vector<Point2f> found;
 	vector<Point2f> frameFeatures;
 
 	if (prevgray.data)
-	{		
+	{
 		//cornerSubPix(gray, old_features, subPixWinSize, Size(-1, -1), termcrit);
-		calcOpticalFlowPyrLK(prevgray, gray, old_features, found, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
+		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
 
-		for (unsigned int i = 0; i < found.size(); i++){
-			circle(frame, found.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
-			old_features.at(i) = found.at(i);
+		for (unsigned int i = 0; i < found_features.size(); i++){
+
+			circle(frame, found_features.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
+			//prev_features.at(i) = found_features.at(i);
 
 			//char c_err[128];
 			//sprintf(c_err,"%.1f", error.at(i));
@@ -312,7 +312,7 @@ void getTexture(Mat &frame, vector<Point> allPoints)
 
 int main(int argc, char* argv[])
 {
-	vector <Point2f> faceKeyPoints;
+	vector <Point2f> asm_points, prev_opfl_points, found_opfl_points;
 	FaceFramesInfo faceFrameInfo;
 	Mat frame, prevgray, gray;
 	OptFlowLKParams optFlowLKParams;
@@ -325,34 +325,67 @@ int main(int argc, char* argv[])
 
 	cap >> frame;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.05, 10, Mat(), 5, 1, 0.05);
+	goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 10, Mat(), 5, 0, 0.04);
+
+	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
+
+	if (!writer.isOpened())
+	{
+		printf("Output video could not be opened");
+		return -1;
+	}
+	bool first_frame = 0;
+	Rect prev_face_position;
 
 	while (1){
 		if (waitKey(33) == 27)	break;
-		
 		cap >> frame;
 
-		if (waitKey(33) == 13){
+		if (first_frame){
 
-			calculationASM(frame, faceKeyPoints, faceFrameInfo);
-			if (faceKeyPoints.at(0).x >= 0){
-				Rect rect_roi = Rect(faceKeyPoints.at(18).x, faceKeyPoints.at(17).y, faceKeyPoints.at(44).x - faceKeyPoints.at(18).x, faceKeyPoints.at(74).y - faceKeyPoints.at(17).y);
-				Mat roi = frame(rect_roi);
+			calculationASM(frame, asm_points, faceFrameInfo); //ASM - face detection
+			if (asm_points.at(0).x >= 0){
+				Rect new_face_position = Rect(asm_points.at(18).x, asm_points.at(17).y, asm_points.at(44).x - asm_points.at(18).x, asm_points.at(74).y - asm_points.at(17).y);
+				Mat roi = frame(new_face_position);
 				roi.copyTo(gray);
 				cvtColor(gray, gray, COLOR_BGR2GRAY);
-				goodFeaturesToTrack(gray, faceKeyPoints, 100, 0.05, 5, Mat(),1,1,0.05);
-				for (unsigned int i = 0; i < faceKeyPoints.size(); i++){
-					faceKeyPoints.at(i) = Point2f(faceKeyPoints.at(i).x + rect_roi.x, faceKeyPoints.at(i).y + rect_roi.y);
+
+				for (unsigned int i = 0; i < prev_opfl_points.size(); i++){
+					prev_opfl_points.at(i) = Point2f(prev_opfl_points.at(i).x + prev_face_position.x, prev_opfl_points.at(i).x + prev_face_position.y);
 				}
+
+				impositionOptFlowLK(frame, prev_opfl_points, found_opfl_points, prevgray, gray, 200, optFlowLKParams);
+
+				for (unsigned int i = 0; i < prev_opfl_points.size(); i++){
+					found_opfl_points.at(i) = Point2f(found_opfl_points.at(i).x + new_face_position.x, found_opfl_points.at(i).x + new_face_position.y);
+					
+					circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
+					circle(frame, prev_opfl_points.at(i), 1, CV_RGB(64, 64, 128), 2, 8, 0);
+					line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
+				}
+
+				goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 5, Mat(), 1, 0, 0.04);
+
+
 			}
 			
+			imshow("OFLK result", frame);
+			writer.write(frame);
+			
 		}
-
-		if (faceKeyPoints.at(0).x > 0){
-			impositionOptFlowLK(frame, faceKeyPoints, prevgray,gray, 200, optFlowLKParams);
+		else	{ 
+			if (asm_points.at(0).x >= 0){
+				Rect new_face_position = Rect(asm_points.at(18).x, asm_points.at(17).y, asm_points.at(44).x - asm_points.at(18).x, asm_points.at(74).y - asm_points.at(17).y);
+				Mat roi = frame(new_face_position);
+				roi.copyTo(gray);
+				cvtColor(gray, gray, COLOR_BGR2GRAY);
+				goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 5, Mat(), 1, 0, 0.04);
+			}
+			first_frame++; 
+			
 		}
-
-		imshow("OFLK result", frame);
+		
+		
 	}
 
 	destroyAllWindows();
