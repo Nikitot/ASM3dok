@@ -25,10 +25,10 @@ struct FaceFramesInfo
 
 struct OptFlowLKParams{
 	Size winSize = Size(11, 11);
-	int maxLevel = 5;
+	int maxLevel = 10;
 	TermCriteria termCrit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
-	int derivLamda = 2;
-	int LKflags = 2;
+	int derivLamda = 0;
+	int LKflags = 0;
 	double minEigThreshold = 0.01;
 };
 
@@ -55,7 +55,10 @@ void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point s
 	}
 }
 
-void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceSize, Point2f &thisCenter){
+void face_points_stabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceSize){
+	float x = (allPoints.at(34).x + allPoints.at(44).x + allPoints.at(67).x) / 3;
+	float y = (allPoints.at(34).y + allPoints.at(44).y + allPoints.at(67).y) / 3;
+	Point2f thisCenter = Point2f(x, y);
 	if (thisCenter.x < 0 || thisCenter.y < 0){
 		Mat nullFrame(maxFaceSize.height, maxFaceSize.width, frame.type());
 		nullFrame.copyTo(frame);
@@ -100,12 +103,11 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 	Mat rot_mat = getRotationMatrix2D(thisCenter, angle*57.3, 1);
 	warpAffine(frame, stableFrame, rot_mat, frame.size());
 
-	//imshow("goodframe", stableFrame);
-	//waitKey(0);
 
 
 	Rect region_of_interest = Rect(thisCenter.x - maxFaceSize.width / 2, thisCenter.y - maxFaceSize.height / 2, maxFaceSize.width, maxFaceSize.height);
 	if (region_of_interest.x >= 0 && region_of_interest.y >= 0){
+
 
 		Mat image_roi = stableFrame(region_of_interest);
 		image_roi.copyTo(frame);
@@ -128,10 +130,10 @@ void facePointsStabilisation(Mat &frame, vector<Point> &allPoints, Size maxFaceS
 }
 
 //return max size for scaling result face
-void calculationASM(Mat &frame, vector<Point2f> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
+void calculationASM(Mat &frame, vector<Point> &prevFaceKeyPoints, FaceFramesInfo &faceFrameInfo){
 
 	Mat_<unsigned char> img;
-	vector<Point2f> faceKeyPoints;
+	vector<Point> faceKeyPoints;
 
 	cvtColor(frame, img, CV_RGB2GRAY);
 	int foundface;
@@ -258,9 +260,8 @@ void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat 
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(Mat &frame, vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
+void impositionOptFlowLK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
 
-	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	vector<uchar> status;
 	vector<float> error;
 	vector<Point2f> frameFeatures;
@@ -270,15 +271,6 @@ void impositionOptFlowLK(Mat &frame, vector<Point2f> &prev_features, vector<Poin
 		//cornerSubPix(gray, old_features, subPixWinSize, Size(-1, -1), termcrit);
 		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
 
-		for (unsigned int i = 0; i < found_features.size(); i++){
-
-			circle(frame, found_features.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
-			//prev_features.at(i) = found_features.at(i);
-
-			//char c_err[128];
-			//sprintf(c_err,"%.1f", error.at(i));
-			//putText(frame, c_err, found.at(i),1,1,CV_RGB(255,255,255));
-		}
 	}
 	swap(prevgray, gray);
 }
@@ -310,9 +302,22 @@ void getTexture(Mat &frame, vector<Point> allPoints)
 	fillPoly(frame, ppt, npt, 1, Scalar::all(0), 8);
 }
 
+//{
+//calculationASM(frame, asm_points, faceFrameInfo); //ASM - face detection
+//if (asm_points.at(0).x >= 0){
+//	int x = asm_points.at(0).x;
+//	int y = asm_points.at(14).y;
+//	int w = asm_points.at(12).x - asm_points.at(0).x;
+//	int h = asm_points.at(6).y - asm_points.at(14).y;
+//	x = x + w / 2 - h / 2;
+//	w = h;
+//	face_points_stabilisation(frame, asm_points, Size(w, h) );
+//	resize(frame,frame,max_size);
+//}
+
 int main(int argc, char* argv[])
 {
-	vector <Point2f> asm_points, prev_opfl_points, found_opfl_points;
+	vector <Point2f> prev_opfl_points;
 	FaceFramesInfo faceFrameInfo;
 	Mat frame, prevgray, gray;
 	OptFlowLKParams optFlowLKParams;
@@ -324,8 +329,6 @@ int main(int argc, char* argv[])
 	}
 
 	cap >> frame;
-	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 10, Mat(), 5, 0, 0.04);
 
 	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
 
@@ -337,55 +340,53 @@ int main(int argc, char* argv[])
 	bool first_frame = 0;
 	Rect prev_face_position;
 
+	Size max_size = Size(240, 240);
+
 	while (1){
 		if (waitKey(33) == 27)	break;
 		cap >> frame;
+		
+		int win_size = 15;
+		int maxCorners = 100;
+		double qualityLevel = 0.05;
+		double minDistance = 2.0;
+		int blockSize = 3;
+		double k = 0.04;
+
 
 		if (first_frame){
+			cvtColor(frame, gray, COLOR_BGR2GRAY);
 
-			calculationASM(frame, asm_points, faceFrameInfo); //ASM - face detection
-			if (asm_points.at(0).x >= 0){
-				Rect new_face_position = Rect(asm_points.at(18).x, asm_points.at(17).y, asm_points.at(44).x - asm_points.at(18).x, asm_points.at(74).y - asm_points.at(17).y);
-				Mat roi = frame(new_face_position);
-				roi.copyTo(gray);
-				cvtColor(gray, gray, COLOR_BGR2GRAY);
+			vector <Point2f> found_opfl_points;
+			//impositionOptFlowLK(prev_opfl_points, found_opfl_points, prevgray, gray, 100, optFlowLKParams);
 
-				for (unsigned int i = 0; i < prev_opfl_points.size(); i++){
-					prev_opfl_points.at(i) = Point2f(prev_opfl_points.at(i).x + prev_face_position.x, prev_opfl_points.at(i).x + prev_face_position.y);
-				}
-
-				impositionOptFlowLK(frame, prev_opfl_points, found_opfl_points, prevgray, gray, 200, optFlowLKParams);
-
-				for (unsigned int i = 0; i < prev_opfl_points.size(); i++){
-					found_opfl_points.at(i) = Point2f(found_opfl_points.at(i).x + new_face_position.x, found_opfl_points.at(i).x + new_face_position.y);
-					
-					circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
-					circle(frame, prev_opfl_points.at(i), 1, CV_RGB(64, 64, 128), 2, 8, 0);
-					line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
-				}
-
-				goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 5, Mat(), 1, 0, 0.04);
-
-
+			for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+				circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
+				line(frame, found_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
 			}
-			
-			imshow("OFLK result", frame);
-			writer.write(frame);
-			
+
+			imshow("fr", gray);
+			prev_opfl_points = vector<Point2f>();
+			goodFeaturesToTrack(gray, prev_opfl_points, maxCorners, qualityLevel, minDistance, cv::Mat(), blockSize, true);
+
 		}
-		else	{ 
-			if (asm_points.at(0).x >= 0){
-				Rect new_face_position = Rect(asm_points.at(18).x, asm_points.at(17).y, asm_points.at(44).x - asm_points.at(18).x, asm_points.at(74).y - asm_points.at(17).y);
-				Mat roi = frame(new_face_position);
-				roi.copyTo(gray);
-				cvtColor(gray, gray, COLOR_BGR2GRAY);
-				goodFeaturesToTrack(gray, prev_opfl_points, 100, 0.05, 5, Mat(), 1, 0, 0.04);
-			}
-			first_frame++; 
-			
+		else
+		{
+			cvtColor(frame, prevgray, COLOR_BGR2GRAY);
+			prev_opfl_points = vector<Point2f>();
+			goodFeaturesToTrack(prevgray, prev_opfl_points, maxCorners, qualityLevel, minDistance, cv::Mat(), blockSize, true);
+			first_frame++;
 		}
-		
-		
+		//
+		//goodFeaturesToTrack(imgA, cornersA, maxCorners, qualityLevel, minDistance, cv::Mat());
+		//goodFeaturesToTrack(imgB, cornersB, maxCorners, qualityLevel, minDistance, cv::Mat());
+
+		//cornerSubPix(imgA, cornersA, Size(win_size, win_size), Size(-1, -1),
+		//	TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03));
+
+		//cornerSubPix(imgB, cornersB, Size(win_size, win_size), Size(-1, -1),
+		//	TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03));
+
 	}
 
 	destroyAllWindows();
