@@ -16,20 +16,22 @@
 using namespace std;
 using namespace cv;
 
-struct FaceFramesInfo
-{
-	Size maxSize = Size(0, 0);
-	int anfasFrame = -1;
-	Point2f thisCenter;
+struct opt_flow_parametrs{
+	Size win_size = Size(11, 11);
+	int max_level = 10;
+	TermCriteria term_crit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
+	int deriv_lamda = 0;
+	int lk_flags = 0;
+	double min_eig_threshold = 0.01;
 };
 
-struct OptFlowLKParams{
-	Size winSize = Size(11, 11);
-	int maxLevel = 10;
-	TermCriteria termCrit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
-	int derivLamda = 0;
-	int LKflags = 0;
-	double minEigThreshold = 0.01;
+struct feature_detect_parametrs{
+	Size win_size = Size(5, 5);
+	int max_Òorners = INT_MAX;
+	double quality_level = 0.01;
+	double min_distance = 10;
+	int block_size = 3;
+	double k = 0.05;
 };
 
 void shiftImageAndPointsFromBorder(Mat &frame, vector<Point> &allPoints, Point shift){
@@ -183,25 +185,6 @@ void calculationASM(Mat &frame, vector<Point> &prevFaceKeyPoints){
 	prevFaceKeyPoints = faceKeyPoints;
 }
 
-void framePoints—oloring(Mat &frame, vector <Point2f> &keyPoints){
-	for (unsigned int p = 0; p < keyPoints.size(); p++){
-		circle(frame, keyPoints.at(p), 1, Scalar(255, 128, 128), 2);
-	}
-
-	line(frame, keyPoints.at(34), keyPoints.at(44), Scalar(0, 0, 255));
-	line(frame, keyPoints.at(34), keyPoints.at(67), Scalar(0, 0, 255));
-	line(frame, keyPoints.at(44), keyPoints.at(67), Scalar(0, 0, 255));
-
-	line(frame, keyPoints.at(14), keyPoints.at(6), Scalar(255, 0, 0));
-	line(frame, keyPoints.at(0), keyPoints.at(12), Scalar(255, 0, 0));
-
-	Point crossLine = ((keyPoints.at(0).x + keyPoints.at(12).x) / 2, (keyPoints.at(14).y + keyPoints.at(6).y) / 2);
-
-	circle(frame, crossLine, 1, Scalar(0, 0, 255), 2);
-
-	//putText(frame, text.str(), Point(frame.cols / 15, frame.rows / 15), FONT_HERSHEY_SCRIPT_SIMPLEX, 2, Scalar::all(255), 3, 8);
-}
-
 void drawOptFlowMap(Mat flow, Mat &frame, int step)
 {
 	for (int y = 0; y < flow.rows / step; y++){
@@ -260,18 +243,13 @@ void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat 
 	swap(prevgray, gray);
 }
 
-void impositionOptFlowLK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, int cornersCount, OptFlowLKParams optFlowLKParams){
+void impositionOptFlowLK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, vector<float> &error, opt_flow_parametrs opf_parametrs){
 
 	vector<uchar> status;
-	vector<float> error;
-	vector<Point2f> frameFeatures;
-
 	if (prevgray.data)
 	{
-		//cornerSubPix(gray, old_features, subPixWinSize, Size(-1, -1), termcrit);
-	//	cornerSubPix(gray, prev_features, Size(10, 10), Size(-1, -1),
-	//		TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03));
-		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error, optFlowLKParams.winSize, optFlowLKParams.maxLevel, optFlowLKParams.termCrit, optFlowLKParams.LKflags, optFlowLKParams.minEigThreshold);
+		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error
+			, opf_parametrs.win_size, opf_parametrs.max_level, opf_parametrs.term_crit, opf_parametrs.lk_flags, opf_parametrs.min_eig_threshold);
 
 	}
 	swap(prevgray, gray);
@@ -318,12 +296,21 @@ void asm_stabilisation(Mat &frame, vector<Point> &asm_points){
 	}
 }
 
+void calculation_SFM(vector <Point2f> found_opfl_points, vector <Point2f> prev_opfl_points){
+	double focal_length = 30;		//mm
+	double pixel_length = 0.2646;	//mm
+
+	for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	vector <Point2f> prev_opfl_points;
-	FaceFramesInfo faceFrameInfo;
 	Mat frame, prevgray, gray;
-	OptFlowLKParams optFlowLKParams;
+	opt_flow_parametrs opf_parametrs;
+	feature_detect_parametrs fd_parametrs;
 
 	VideoCapture cap(0);
 	if (!cap.isOpened()){
@@ -334,55 +321,46 @@ int main(int argc, char* argv[])
 	cap >> frame;
 
 	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
-
 	if (!writer.isOpened())
 	{
 		printf("Output video could not be opened");
 		return -1;
 	}
-	bool first_frame = 0;
-	Rect prev_face_position;
 
-	Size max_size = Size(240, 240);
-
+	bool first_frame = false;
+	
 	while (1){
 		if (waitKey(33) == 27)	break;
 		cap >> frame;
 
-		int win_size = 5;
-		int maxCorners = 300;
-		double qualityLevel = 0.05;
-		double minDistance = 5;
-		int blockSize = 5;
-		double k = 0.04;
-
+		vector<float> error;
 
 		if (first_frame){
 			cvtColor(frame, gray, COLOR_BGR2GRAY);
 
 			vector <Point2f> found_opfl_points;
-			impositionOptFlowLK(prev_opfl_points, found_opfl_points, prevgray, gray, maxCorners, optFlowLKParams);
+			impositionOptFlowLK(prev_opfl_points, found_opfl_points, prevgray, gray, error, opf_parametrs);
 
-			for (unsigned int i = 0; i < found_opfl_points.size(); i++){				
-				circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
-				line(frame, found_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
+
+			for (unsigned int i = 0; i < found_opfl_points.size(); i++){	
+				if (error.at(i) == 0){
+					circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
+					line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
+				}
 			}
 			imshow("frame", frame);
-
-			prev_opfl_points = vector<Point2f>();
-			//goodFeaturesToTrack(gray, prev_opfl_points, maxCorners, qualityLevel, minDistance, cv::Mat(), blockSize, true);
-			goodFeaturesToTrack(prevgray, prev_opfl_points, maxCorners, qualityLevel, minDistance, Mat(), blockSize, 0, k);
+			goodFeaturesToTrack(prevgray, prev_opfl_points
+				, fd_parametrs.max_Òorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
 		}
 		else
 		{
 			cvtColor(frame, prevgray, COLOR_BGR2GRAY);
 			prev_opfl_points = vector<Point2f>();
-			resize(frame, frame, max_size);
-			goodFeaturesToTrack(prevgray, prev_opfl_points, maxCorners, qualityLevel, minDistance, cv::Mat(), blockSize, false, k);
+			goodFeaturesToTrack(prevgray, prev_opfl_points
+				, fd_parametrs.max_Òorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
 
 			first_frame++;
 		}
-
 	}
 
 	destroyAllWindows();
