@@ -31,7 +31,7 @@ struct opt_flow_parametrs{
 struct feature_detect_parametrs{
 	Size win_size = Size(15, 15);
 	int max_ñorners = INT_MAX;
-	double quality_level = 0.001;
+	double quality_level = 0.01;
 	double min_distance = 15;
 	int block_size = 3;
 	double k = 0.05;
@@ -169,7 +169,7 @@ int main(int argc, char* argv[])
 		cap >> frame;
 
 		vector<Rect> faces;
-		face_cascade.detectMultiScale(frame, faces, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(150, 150));
+		face_cascade.detectMultiScale(frame, faces, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(100, 100));
 
 		if (faces.size() != 0)
 		{
@@ -183,6 +183,7 @@ int main(int argc, char* argv[])
 				vector <Point2f> found_opfl_points;
 				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
 
+				Scalar color = Scalar(rand() % 255 + 1, rand() % 255 + 1, rand() % 255 + 1);				
 
 				for (unsigned int i = 0; i < found_opfl_points.size(); i++){
 					if (error.at(i) == 0){
@@ -192,10 +193,10 @@ int main(int argc, char* argv[])
 						
 						Point2f frame_coord = Point2f(found_opfl_points.at(i).x + faces[0].x);
 
-						if (delta < frame.cols / 10 && status.at(i) == '\0'){
+						if (delta < frame.cols / 15 && status.at(i) == '\0'){
 
-							circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
-							line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
+							circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
+							line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
 							
 							//prev_opfl_points.at(i) = found_opfl_points.at(i);
 						}
@@ -209,9 +210,11 @@ int main(int argc, char* argv[])
 
 				imshow("frame", frame);
 
+				writer.write(frame);
 				//calculation_SFM(frame, found_opfl_points, prev_opfl_points);
 				//calculation_simple_Z(prevgray, gray, found_opfl_points, prev_opfl_points);
 
+				
 
 				good_features_init(frame, faces[0], prev_opfl_points);
 			}
@@ -227,6 +230,7 @@ int main(int argc, char* argv[])
 		}
 		
 	}
+	writer.release();
 
 	return 0;
 }
