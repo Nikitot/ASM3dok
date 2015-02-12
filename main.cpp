@@ -19,8 +19,12 @@
 using namespace std;
 using namespace cv;
 
+GLfloat yRotated;
+vector<Point3f> points_3d;
+Point3f camera_position;
+
 struct opt_flow_parametrs{
-	Size win_size = Size(15, 15);
+	Size win_size = Size(11, 11);
 	int max_level = 10;
 	TermCriteria term_crit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
 	int deriv_lamda = 0;
@@ -29,15 +33,15 @@ struct opt_flow_parametrs{
 };
 
 struct feature_detect_parametrs{
-	Size win_size = Size(15, 15);
-	int max_ñorners = INT_MAX;
-	double quality_level = 0.01;
+	Size win_size = Size(5, 5);
+	int max_ñorners = 1000;
+	double quality_level = 0.001;
 	double min_distance = 15;
 	int block_size = 3;
 	double k = 0.05;
 };
 
-void draw_opt_flow_map(Mat flow, Mat &frame, int step)
+void drawOptFlowMap(Mat flow, Mat &frame, int step)
 {
 	for (int y = 0; y < flow.rows / step; y++){
 		for (int x = 0; x < flow.cols / step; x++)
@@ -59,7 +63,7 @@ void draw_opt_flow_map(Mat flow, Mat &frame, int step)
 	}
 }
 
-void imposition_opt_flow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat &prevgray){
+void impositionOptFlow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat &prevgray){
 	Mat flow, cflow;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
 	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
@@ -67,13 +71,14 @@ void imposition_opt_flow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Ma
 	if (prevgray.data)
 	{
 		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 7, 10, 3, 7, 1.5, OPTFLOW_FARNEBACK_GAUSSIAN);
-		draw_opt_flow_map(flow, frame, 2);
+		drawOptFlowMap(flow, frame, 2);
 	}
 	swap(prevgray, gray);
 }
 
-void imposition_opt_flow_LK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, vector<float> &error, vector<uchar> &status, opt_flow_parametrs opf_parametrs){
+void impositionOptFlowLK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, vector<float> &error, opt_flow_parametrs opf_parametrs){
 
+	vector<uchar> status;
 	if (prevgray.data)
 	{
 		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error
@@ -83,16 +88,132 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_features, vector<Point2f> &fou
 	swap(prevgray, gray);
 }
 
-//Not used
+
+void init()
+{
+	glClearColor(0, 0, 0, 0);
+}
+
+void draw_point_cloud()
+{
+
+	glMatrixMode(GL_MODELVIEW);
+	// clear the drawing buffer.
+	glClear(GL_COLOR_BUFFER_BIT);
+	glLoadIdentity();
+	glTranslatef(camera_position.x, camera_position.y, camera_position.z);
+	// rotation about X axis
+	glRotatef(0, 1.0, 0.0, 0.0);
+	// rotation about Y axis
+	glRotatef(yRotated, 0.0, 1.0, 0.0);
+	// rotation about Z axis
+	glRotatef(0, 0.0, 0.0, 1.0);
+
+	glBegin(GL_POINTS);
+
+	for (unsigned int i = 0; i < points_3d.size(); i++){
+		if (points_3d.at(i).x != 0 && points_3d.at(i).y != 0 && points_3d.at(i).z)
+			glVertex3f(points_3d.at(i).x, points_3d.at(i).y, points_3d.at(i).z);
+	}
+	glEnd();
+	glFlush();
+}
+
+void animation()
+{
+	yRotated += 0.01;
+	draw_point_cloud();
+}
+
+void reshape(int x, int y)
+{
+	if (y == 0 || x == 0) return;  //Nothing is visible then, so return
+	//Set a new projection matrix
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	//Angle of view:40 degrees
+	//Near clipping plane distance: 0.5
+	//Far clipping plane distance: 20.0
+
+	gluPerspective(40.0, (GLdouble)x / (GLdouble)y, 0.5, 20.0);
+	glMatrixMode(GL_MODELVIEW);
+	glViewport(0, 0, x, y);  //Use the whole window for rendering
+}
+
+
+void calculation_SFM(Mat &depth_map, vector <Point2f> found_opfl_points, vector <Point2f> prev_opfl_points){
+	if (found_opfl_points.size() != found_opfl_points.size()){
+		return;
+	}
+
+	double focal_length = 30;		//mm
+	double pixel_length = 0.2646;	//mm
+
+
+	const int size = 300;
+	Matx<float, 4, size> W;
+	Matx <float, 4, 1> U;
+	Matx <float, 4, 4>	D;
+	Matx <float, 4, size> Vt;
+	points_3d = vector<Point3f>();
+
+	Point2f prev_mass_center = Point2f(0, 0);
+	Point2f found_mass_center = Point2f(0, 0);
+	for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+		prev_mass_center = Point2f(prev_opfl_points.at(i).x + prev_mass_center.x
+			, prev_opfl_points.at(i).y + prev_mass_center.y);
+
+		found_mass_center = Point2f(found_opfl_points.at(i).x + found_mass_center.x
+			, found_opfl_points.at(i).y + found_mass_center.y);
+	}
+	prev_mass_center = Point2f(prev_mass_center.x / prev_opfl_points.size(), prev_mass_center.y / prev_opfl_points.size());
+	found_mass_center = Point2f(found_mass_center.x / found_opfl_points.size(), found_mass_center.y / found_opfl_points.size());
+
+	for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+		found_opfl_points.at(i) = Point2f(found_opfl_points.at(i).x - found_mass_center.x, found_opfl_points.at(i).y - found_mass_center.y);
+		prev_opfl_points.at(i) = Point2f(prev_opfl_points.at(i).x - prev_mass_center.x, prev_opfl_points.at(i).y - prev_mass_center.y);
+	}
+
+
+
+	for (int i = 0; i < size; i++)
+	{
+		if (i < prev_opfl_points.size()){
+			W.val[i] = prev_opfl_points.at(i).x;
+			W.val[i + size] = prev_opfl_points.at(i).y;
+			W.val[i + size * 2] = found_opfl_points.at(i).x;
+			W.val[i + size * 3] = found_opfl_points.at(i).y;
+		}
+		else
+			break;
+	}
+
+	SVD::compute(W, U, D, Vt);
+
+	camera_position = Point3f(U.val[0], U.val[1], U.val[2]);
+
+	for (int i = 0; i < size; i++)
+	{
+		points_3d.push_back(Point3f(Vt.val[i], Vt.val[i + size], Vt.val[i + size * 2]));
+	}
+
+	glutDisplayFunc(draw_point_cloud);
+	glutReshapeFunc(reshape);
+	//Set the function for the animation.
+	glutIdleFunc(animation);
+	glutMainLoop();
+
+}
+
 void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_points, vector <Point2f> prev_opfl_points)
 {
 
 	//double focal_length = 30;		//mm
 	//double pixel_length = 0.2646;	//mm
 
-	//points_3d = vector<Point3f>();
+	points_3d = vector<Point3f>();
 
-	double f = 30;
+	double f = 300;
 	double B = 1;
 	int w = img1.cols;
 	int h = img1.rows;
@@ -110,42 +231,23 @@ void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_poin
 		Z = (B * f) / delta;
 		X = (prev_opfl_points.at(i).x + prev_opfl_points.at(i).y) / 2;
 		Y = (prev_opfl_points.at(i).y + prev_opfl_points.at(i).y) / 2;
-		//points_3d.push_back(Point3f(X, Y, Z));
+		points_3d.push_back(Point3f(X, Y, Z));
 	}
 
-	//glutDisplayFunc(draw_point_cloud);
-	//glutReshapeFunc(reshape);
+	glutDisplayFunc(draw_point_cloud);
+	glutReshapeFunc(reshape);
 	//Set the function for the animation.
-	//glutIdleFunc(animation);
-	//glutMainLoop();
+	glutIdleFunc(animation);
+	glutMainLoop();
 
-}
-
-void good_features_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points)
-{
-	feature_detect_parametrs fd_parametrs;
-	Mat gray_face, face;
-	Mat image_roi = frame(rect_face);
-	image_roi.copyTo(face);
-	cvtColor(face, gray_face, COLOR_BGR2GRAY);
-
-	prev_opfl_points = vector<Point2f>();
-	goodFeaturesToTrack(gray_face, prev_opfl_points
-		, fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
-	for (unsigned int i = 0; i < prev_opfl_points.size(); i++)
-	{
-		prev_opfl_points.at(i) = Point2f(prev_opfl_points.at(i).x + rect_face.x, prev_opfl_points.at(i).y + rect_face.y);
-	}
 }
 
 int main(int argc, char* argv[])
 {
 	vector <Point2f> prev_opfl_points;
-	Mat frame, prev_gray_frame, gray_frame, face;
+	Mat frame, prevgray, gray;
 	opt_flow_parametrs opf_parametrs;
-
-	CascadeClassifier face_cascade;
-	face_cascade.load("E:/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
+	feature_detect_parametrs fd_parametrs;
 
 	VideoCapture cap(0);
 	if (!cap.isOpened()){
@@ -154,6 +256,13 @@ int main(int argc, char* argv[])
 	}
 
 	cap >> frame;
+
+	glutInit(&argc, argv);
+	//we initizlilze the glut. functions
+	glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+	glutInitWindowPosition(frame.cols / 2, frame.rows / 2);
+	glutCreateWindow("Point Cloud");
+	init();
 
 	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
 	if (!writer.isOpened())
@@ -164,73 +273,54 @@ int main(int argc, char* argv[])
 
 	bool second_frame = false;
 
+
+
+
 	while (1){
 		if (waitKey(33) == 27)	break;
 		cap >> frame;
-
-		vector<Rect> faces;
-		face_cascade.detectMultiScale(frame, faces, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(100, 100));
-
-		if (faces.size() != 0)
-		{
-			vector<float> error;
-			vector<uchar> status;
-
-			if (second_frame){
+		vector<float> error;
 
 
-				cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
-				vector <Point2f> found_opfl_points;
-				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
+		if (second_frame){
+			cvtColor(frame, gray, COLOR_BGR2GRAY);
 
-				Scalar color = Scalar(rand() % 255 + 1, rand() % 255 + 1, rand() % 255 + 1);				
+			vector <Point2f> found_opfl_points;
+			impositionOptFlowLK(prev_opfl_points, found_opfl_points, prevgray, gray, error, opf_parametrs);
 
-				for (unsigned int i = 0; i < found_opfl_points.size(); i++){
-					if (error.at(i) == 0){
-						float delta_x = abs(found_opfl_points.at(i).x - prev_opfl_points.at(i).x);
-						float delta_y = abs(found_opfl_points.at(i).y - prev_opfl_points.at(i).y);
-						double delta = pow(pow(delta_x, 2) + pow(delta_y, 2), 0.5);
-						
-						Point2f frame_coord = Point2f(found_opfl_points.at(i).x + faces[0].x);
 
-						if (delta < frame.cols / 15 && status.at(i) == '\0'){
-
-							circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
-							line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
-							
-							//prev_opfl_points.at(i) = found_opfl_points.at(i);
-						}
-						else
-						{
-							circle(frame, found_opfl_points.at(i), 1, CV_RGB(200, 0, 0), 2, 8, 0);
-						}
-
-					}
+			for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+				if (error.at(i) == 0){
+					circle(frame, found_opfl_points.at(i), 1, CV_RGB(128, 128, 255), 2, 8, 0);
+					line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), CV_RGB(64, 64, 128));
 				}
-
-				imshow("frame", frame);
-
-				writer.write(frame);
-				//calculation_SFM(frame, found_opfl_points, prev_opfl_points);
-				//calculation_simple_Z(prevgray, gray, found_opfl_points, prev_opfl_points);
-
-				
-
-				good_features_init(frame, faces[0], prev_opfl_points);
 			}
-			else
-			{
-				if (waitKey(33) == 27)	break;
-				
-				good_features_init(frame, faces[0], prev_opfl_points);
-				
-				if (prev_opfl_points.size() != 0)
-					second_frame = true;
-			}
+
+			////////////////////////////////////////////
+			imshow("frame", frame);
+			//calculation_SFM(frame, found_opfl_points, prev_opfl_points);
+
+
+			calculation_simple_Z(prevgray, gray, found_opfl_points, prev_opfl_points);
+			////////////////////////////////////////////
+
+			prev_opfl_points = vector<Point2f>();
+			goodFeaturesToTrack(prevgray, prev_opfl_points
+				, fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
+
 		}
-		
+		else
+		{
+			if (waitKey(33) == 27)	break;
+			imshow("frame", frame);
+			cvtColor(frame, prevgray, COLOR_BGR2GRAY);
+			prev_opfl_points = vector<Point2f>();
+			goodFeaturesToTrack(prevgray, prev_opfl_points
+				, fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
+			if (prev_opfl_points.size() != 0)
+				second_frame = true;
+		}
 	}
-	writer.release();
 
 	return 0;
 }
