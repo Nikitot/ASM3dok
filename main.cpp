@@ -1,8 +1,7 @@
 #include <cv.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "highgui.h"
-#include "cxcore.h"
+#include <highgui.h>
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -11,10 +10,16 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/core/core.hpp>
-#include <opencv2/calib3d.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
 #include <cxcore.h>
 #include <gl/glew.h>
 #include <gl/freeglut.h>
+
+
+#include <windows.h> 
+#define _USE_MATH_DEFINES
+#include <math.h>
+#define FOCAL_LENGTH 1000
 
 using namespace std;
 using namespace cv;
@@ -23,7 +28,7 @@ struct opt_flow_parametrs{
 	Size win_size = Size(15, 15);
 	int max_level = 10;
 	TermCriteria term_crit = TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03);
-	int deriv_lamda = 0;
+	int deriv_lamda = 2;
 	int lk_flags = 0;
 	double min_eig_threshold = 0.01;
 };
@@ -86,12 +91,6 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_features, vector<Point2f> &fou
 //Not used
 void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_points, vector <Point2f> prev_opfl_points)
 {
-
-	//double focal_length = 30;		//mm
-	//double pixel_length = 0.2646;	//mm
-
-	//points_3d = vector<Point3f>();
-
 	double f = 30;
 	double B = 1;
 	int w = img1.cols;
@@ -110,42 +109,75 @@ void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_poin
 		Z = (B * f) / delta;
 		X = (prev_opfl_points.at(i).x + prev_opfl_points.at(i).y) / 2;
 		Y = (prev_opfl_points.at(i).y + prev_opfl_points.at(i).y) / 2;
-		//points_3d.push_back(Point3f(X, Y, Z));
 	}
-
-	//glutDisplayFunc(draw_point_cloud);
-	//glutReshapeFunc(reshape);
-	//Set the function for the animation.
-	//glutIdleFunc(animation);
-	//glutMainLoop();
-
 }
 
-void good_features_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points)
+Point3f projectPointsOnCylinder(cv::Point2f point, float r) {
+	cv::Point3f p;
+	p.x = point.x;
+	p.y = point.y;
+	p.z = -(float)(sqrt(r*r - point.x*point.x));
+	return p;
+}
+
+void good_features_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points, vector<CvPoint3D32f> &modelPoints, double &roll, double &pitch, double &yaw, Scalar &color)
 {
+	roll = 0;
+	pitch = 0;
+	yaw = 0;
+
+	color = Scalar(rand() % 255 + 1, rand() % 255 + 1, rand() % 255 + 1);
+
 	feature_detect_parametrs fd_parametrs;
 	Mat gray_face, face;
 	Mat image_roi = frame(rect_face);
 	image_roi.copyTo(face);
 	cvtColor(face, gray_face, COLOR_BGR2GRAY);
 
-	prev_opfl_points = vector<Point2f>();
+	float half_width = frame.cols / 2.0;
+	float half_height = frame.rows / 2.0;
+	float cylWidth = (float)rect_face.width;
+
+	prev_opfl_points.clear();
+
 	goodFeaturesToTrack(gray_face, prev_opfl_points
 		, fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
+
+
+	modelPoints.clear();
+
 	for (unsigned int i = 0; i < prev_opfl_points.size(); i++)
 	{
 		prev_opfl_points.at(i) = Point2f(prev_opfl_points.at(i).x + rect_face.x, prev_opfl_points.at(i).y + rect_face.y);
+		Point2f centeredPoint = Point2f(half_width - prev_opfl_points.at(i).x, half_height - prev_opfl_points.at(i).y);
+		Point3f cylinderPoint = projectPointsOnCylinder(centeredPoint, cylWidth);
+		modelPoints.push_back(cvPoint3D32f(cylinderPoint.x, cylinderPoint.y, cylinderPoint.z));
 	}
 }
+
+double deg2rad(double deg)
+{
+	return (M_PI * deg / 180.0);
+}
+double rad2deg(double rad)
+{
+	return (180.0 * rad / (M_PI));
+}
+
 
 int main(int argc, char* argv[])
 {
 	vector <Point2f> prev_opfl_points;
 	Mat frame, prev_gray_frame, gray_frame, face;
 	opt_flow_parametrs opf_parametrs;
+	vector<CvPoint3D32f> modelPoints;
 
+	double roll = 0;
+	double pitch = 0;
+	double yaw = 0;
+	
 	CascadeClassifier face_cascade;
-	face_cascade.load("E:/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
+	face_cascade.load("E:/opencv2410/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
 
 	VideoCapture cap(0);
 	if (!cap.isOpened()){
@@ -154,6 +186,8 @@ int main(int argc, char* argv[])
 	}
 
 	cap >> frame;
+	float half_width = frame.cols / 2.0f;
+	float half_height = frame.rows / 2.0f;
 
 	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
 	if (!writer.isOpened())
@@ -163,6 +197,7 @@ int main(int argc, char* argv[])
 	}
 
 	bool second_frame = false;
+	Scalar color;
 
 	while (1){
 		if (waitKey(33) == 27)	break;
@@ -175,16 +210,22 @@ int main(int argc, char* argv[])
 		{
 			vector<float> error;
 			vector<uchar> status;
+			
+			faces[0] = Rect(
+				faces[0].x + faces[0].width / 4
+				, faces[0].y + faces[0].height / 3.5
+				, faces[0].width - faces[0].width / 2
+				, faces[0].height - faces[0].height / 1.2
+				);
+
 
 			if (second_frame){
-
-
 				cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
 				vector <Point2f> found_opfl_points;
 				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
 
-				Scalar color = Scalar(rand() % 255 + 1, rand() % 255 + 1, rand() % 255 + 1);
-
+				
+				int good_points = 0;
 				for (unsigned int i = 0; i < found_opfl_points.size(); i++){
 					if (error.at(i) == 0){
 						float delta_x = abs(found_opfl_points.at(i).x - prev_opfl_points.at(i).x);
@@ -192,13 +233,14 @@ int main(int argc, char* argv[])
 						double delta = pow(pow(delta_x, 2) + pow(delta_y, 2), 0.5);
 
 						Point2f frame_coord = Point2f(found_opfl_points.at(i).x + faces[0].x);
-
+						
 						if (delta < frame.cols / 15 && status.at(i) == '\0'){
 
 							circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
 							line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
 
-							//prev_opfl_points.at(i) = found_opfl_points.at(i);
+							prev_opfl_points.at(i) = found_opfl_points.at(i);
+							good_points++;
 						}
 						else
 						{
@@ -208,29 +250,65 @@ int main(int argc, char* argv[])
 					}
 				}
 
+				if (good_points > 6){
+					vector<CvPoint2D32f> points;
+					vector<Point3f> objectPoints;
+
+					CvMatr32f rotation_matrix = new float[9];
+					CvVect32f translation_vector = new float[3];
+
+					CvTermCriteria criteria = cvTermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 100, 1.0e-4f);
+					CvPOSITObject *positObject = cvCreatePOSITObject(&modelPoints[0], (int)modelPoints.size());
+
+					points.clear();
+					for (int i = 0; i < found_opfl_points.size(); i++) {
+						points.push_back(cvPoint2D32f(half_width - found_opfl_points.at(i).x, half_height - found_opfl_points.at(i).y));
+					}
+
+					cvPOSIT(positObject, &points[0], FOCAL_LENGTH, criteria, rotation_matrix, translation_vector);
+
+					roll = atan(rotation_matrix[3] / rotation_matrix[0]);
+					pitch = atan((-rotation_matrix[6]) / (rotation_matrix[0]))*cos(roll) + rotation_matrix[3] * sin(roll);
+					yaw = atan(rotation_matrix[7] / rotation_matrix[8]);
+
+				}
+				string roll1 = "roll: " + std::to_string(rad2deg(roll));
+				string pitch1 = "pitch: " + std::to_string(rad2deg(pitch));
+				string yaw1 = "yaw: " + std::to_string(rad2deg(yaw));
+				putText(frame, roll1, cv::Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, pitch1, cv::Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, yaw1, cv::Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
+
 				imshow("frame", frame);
 
+				//good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw);
+
+				
 				writer.write(frame);
+
 				//calculation_SFM(frame, found_opfl_points, prev_opfl_points);
 				//calculation_simple_Z(prevgray, gray, found_opfl_points, prev_opfl_points);
 
+				if (cv::waitKey(33) == 13) {
+					good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw, color);
+				}
 
 
-				good_features_init(frame, faces[0], prev_opfl_points);
 			}
 			else
 			{
 				if (waitKey(33) == 27)	break;
 
-				good_features_init(frame, faces[0], prev_opfl_points);
+				good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw, color);
+
+				cvtColor(frame, prev_gray_frame, COLOR_BGR2GRAY);
 
 				if (prev_opfl_points.size() != 0)
 					second_frame = true;
 			}
 		}
-
 	}
-	writer.release();
+	//writer.release();
 
 	return 0;
 }
