@@ -42,50 +42,28 @@ struct feature_detect_parametrs{
 	double k = 0.05;
 };
 
-void draw_opt_flow_map(Mat flow, Mat &frame, int step)
+struct posit_orientation{
+	double roll = 0;
+	double pitch = 0;
+	double yaw = 0;
+};
+
+double deg2rad(double deg)
 {
-	for (int y = 0; y < flow.rows / step; y++){
-		for (int x = 0; x < flow.cols / step; x++)
-		{
-			const Point2f& fxy = flow.at<Point2f>(y*step, x*step);
-
-			Point p1(x*step, y*step);
-			Point p2(round(x*step + fxy.x), round(y*step + fxy.y));
-
-			//line(frame, Point(p1.x * 2, p1.y * 2), Point(p2.x * 2, p2.y * 2), CV_RGB(255, 255, 255));
-
-			float length_fxy = pow(pow(fxy.x, 2) + pow(fxy.y, 2), 0.5);
-			float length_xy = pow(pow(step, 2) + pow(step, 2), 0.5);
-
-
-			float color = length_fxy * 20;
-			circle(frame, Point(p1.x * 2, p1.y * 2), 2, Scalar(int(color), int(color), int(color)));
-		}
-	}
+	return (M_PI * deg / 180.0);
 }
 
-void imposition_opt_flow(Mat &frame, vector<Point> &faceKeyPoints, Mat &gray, Mat &prevgray){
-	Mat flow, cflow;
-	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	resize(gray, gray, Size(frame.cols / 2, frame.rows / 2));
-
-	if (prevgray.data)
-	{
-		calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 7, 10, 3, 7, 1.5, OPTFLOW_FARNEBACK_GAUSSIAN);
-		draw_opt_flow_map(flow, frame, 2);
-	}
-	swap(prevgray, gray);
+double rad2deg(double rad)
+{
+	return (180.0 * rad / (M_PI));
 }
 
-void imposition_opt_flow_LK(vector<Point2f> &prev_features, vector<Point2f> &found_features, Mat &prevgray, Mat &gray, vector<float> &error, vector<uchar> &status, opt_flow_parametrs opf_parametrs){
-
-	if (prevgray.data)
-	{
-		calcOpticalFlowPyrLK(prevgray, gray, prev_features, found_features, status, error
-			, opf_parametrs.win_size, opf_parametrs.max_level, opf_parametrs.term_crit, opf_parametrs.lk_flags, opf_parametrs.min_eig_threshold);
-
-	}
-	swap(prevgray, gray);
+Point3f projectPointsOnCylinder(cv::Point2f point, float r) {
+	cv::Point3f p;
+	p.x = point.x;
+	p.y = point.y;
+	p.z = -(float)(sqrt(r*r - point.x*point.x));
+	return p;
 }
 
 //Not used
@@ -112,19 +90,75 @@ void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_poin
 	}
 }
 
-Point3f projectPointsOnCylinder(cv::Point2f point, float r) {
-	cv::Point3f p;
-	p.x = point.x;
-	p.y = point.y;
-	p.z = -(float)(sqrt(r*r - point.x*point.x));
-	return p;
+void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &found_opfl_points, Mat &prevgray, Mat &frame
+	, int &good_points_count, Rect face_rect, vector<float> &error, vector<uchar> &status, opt_flow_parametrs opf_parametrs, Scalar color){
+
+	//imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
+	Mat gray_frame;
+	cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
+
+	if (prevgray.data)
+	{
+		calcOpticalFlowPyrLK(prevgray, gray_frame, prev_opfl_points, found_opfl_points, status
+			, error, opf_parametrs.win_size, opf_parametrs.max_level, opf_parametrs.term_crit
+			, opf_parametrs.lk_flags, opf_parametrs.min_eig_threshold);
+
+	}
+
+	good_points_count = 0;
+	for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+		float delta_x = abs(found_opfl_points.at(i).x - prev_opfl_points.at(i).x);
+		float delta_y = abs(found_opfl_points.at(i).y - prev_opfl_points.at(i).y);
+		double delta = pow(pow(delta_x, 2) + pow(delta_y, 2), 0.5);
+
+		Point2f frame_coord = Point2f(found_opfl_points.at(i).x + face_rect.x);
+
+		if (delta < gray_frame.cols / 15 && status.at(i) == '\0' && error.at(i) == 0){
+
+			circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
+			line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
+
+			prev_opfl_points.at(i) = found_opfl_points.at(i);
+			good_points_count++;
+		}
+		else
+		{
+			circle(frame, found_opfl_points.at(i), 1, CV_RGB(200, 0, 0), 2, 8, 0);
+		}
+	}
+	swap(prevgray, gray_frame);
 }
 
-void good_features_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points, vector<CvPoint3D32f> &modelPoints, double &roll, double &pitch, double &yaw, Scalar &color)
+void calculation_POSIT(vector<CvPoint3D32f> &modelPoints, vector<Point2f> &found_opfl_points, Size half_size, posit_orientation &orientation, int good_points_count)
 {
-	roll = 0;
-	pitch = 0;
-	yaw = 0;
+	if (good_points_count > 6){
+		vector<Point3f> objectPoints;
+		vector<CvPoint2D32f> points;
+
+		CvMatr32f rotation_matrix = new float[9];
+		CvVect32f translation_vector = new float[3];
+
+		CvTermCriteria criteria = cvTermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 100, 1.0e-4f);
+		CvPOSITObject *positObject = cvCreatePOSITObject(&modelPoints[0], (int)modelPoints.size());
+		points.clear();
+		for (int i = 0; i < found_opfl_points.size(); i++) {
+			points.push_back(cvPoint2D32f(half_size.width - found_opfl_points.at(i).x, half_size.width - found_opfl_points.at(i).y));
+		}
+
+		cvPOSIT(positObject, &points[0], FOCAL_LENGTH, criteria, rotation_matrix, translation_vector);
+
+		orientation.roll = atan(rotation_matrix[3] / rotation_matrix[0]);
+		orientation.pitch = atan((-rotation_matrix[6]) / (rotation_matrix[0]))*cos(orientation.roll) + rotation_matrix[3] * sin(orientation.roll);
+		orientation.yaw = atan(rotation_matrix[7] / rotation_matrix[8]);
+
+	}
+}
+
+void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points, vector<CvPoint3D32f> &modelPoints, posit_orientation &orientation, Scalar &color)
+{
+	orientation.roll = 0;
+	orientation.pitch = 0;
+	orientation.yaw = 0;
 
 	color = Scalar(rand() % 255 + 1, rand() % 255 + 1, rand() % 255 + 1);
 
@@ -155,27 +189,16 @@ void good_features_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_po
 	}
 }
 
-double deg2rad(double deg)
-{
-	return (M_PI * deg / 180.0);
-}
-double rad2deg(double rad)
-{
-	return (180.0 * rad / (M_PI));
-}
-
-
 int main(int argc, char* argv[])
 {
 	vector <Point2f> prev_opfl_points;
+	vector<CvPoint3D32f> modelPoints;
 	Mat frame, prev_gray_frame, gray_frame, face;
 	opt_flow_parametrs opf_parametrs;
-	vector<CvPoint3D32f> modelPoints;
+	posit_orientation orientation;
+	Scalar color;
+	bool second_frame = false;
 
-	double roll = 0;
-	double pitch = 0;
-	double yaw = 0;
-	
 	CascadeClassifier face_cascade;
 	face_cascade.load("E:/opencv2410/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
 
@@ -186,8 +209,8 @@ int main(int argc, char* argv[])
 	}
 
 	cap >> frame;
-	float half_width = frame.cols / 2.0f;
-	float half_height = frame.rows / 2.0f;
+
+	Size2f half_size = Size2f(frame.cols / 2.0f, frame.rows / 2.0f);
 
 	VideoWriter writer("./video_result.avi", 0, 15, frame.size(), true);
 	if (!writer.isOpened())
@@ -195,9 +218,6 @@ int main(int argc, char* argv[])
 		printf("Output video could not be opened");
 		return -1;
 	}
-
-	bool second_frame = false;
-	Scalar color;
 
 	while (1){
 		if (waitKey(33) == 27)	break;
@@ -210,97 +230,44 @@ int main(int argc, char* argv[])
 		{
 			vector<float> error;
 			vector<uchar> status;
-			
-			faces[0] = Rect(
+
+			Rect face_rect = Rect(
 				faces[0].x + faces[0].width / 4
 				, faces[0].y + faces[0].height / 3.5
 				, faces[0].width - faces[0].width / 2
-				, faces[0].height - faces[0].height / 1.2
+				, faces[0].height - faces[0].height / 1.3
 				);
 
-
 			if (second_frame){
-				cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
-				vector <Point2f> found_opfl_points;
-				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
+				vector<Point2f> found_opfl_points;
+				int good_points_count = 0;
 
-				
-				int good_points = 0;
-				for (unsigned int i = 0; i < found_opfl_points.size(); i++){
-					if (error.at(i) == 0){
-						float delta_x = abs(found_opfl_points.at(i).x - prev_opfl_points.at(i).x);
-						float delta_y = abs(found_opfl_points.at(i).y - prev_opfl_points.at(i).y);
-						double delta = pow(pow(delta_x, 2) + pow(delta_y, 2), 0.5);
+				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, frame, good_points_count, face_rect
+					, error, status, opf_parametrs, color);
 
-						Point2f frame_coord = Point2f(found_opfl_points.at(i).x + faces[0].x);
-						
-						if (delta < frame.cols / 15 && status.at(i) == '\0'){
+				calculation_POSIT(modelPoints, found_opfl_points, half_size, orientation, good_points_count);
 
-							circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
-							line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
-
-							prev_opfl_points.at(i) = found_opfl_points.at(i);
-							good_points++;
-						}
-						else
-						{
-							circle(frame, found_opfl_points.at(i), 1, CV_RGB(200, 0, 0), 2, 8, 0);
-						}
-
-					}
-				}
-
-				if (good_points > 6){
-					vector<CvPoint2D32f> points;
-					vector<Point3f> objectPoints;
-
-					CvMatr32f rotation_matrix = new float[9];
-					CvVect32f translation_vector = new float[3];
-
-					CvTermCriteria criteria = cvTermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 100, 1.0e-4f);
-					CvPOSITObject *positObject = cvCreatePOSITObject(&modelPoints[0], (int)modelPoints.size());
-
-					points.clear();
-					for (int i = 0; i < found_opfl_points.size(); i++) {
-						points.push_back(cvPoint2D32f(half_width - found_opfl_points.at(i).x, half_height - found_opfl_points.at(i).y));
-					}
-
-					cvPOSIT(positObject, &points[0], FOCAL_LENGTH, criteria, rotation_matrix, translation_vector);
-
-					roll = atan(rotation_matrix[3] / rotation_matrix[0]);
-					pitch = atan((-rotation_matrix[6]) / (rotation_matrix[0]))*cos(roll) + rotation_matrix[3] * sin(roll);
-					yaw = atan(rotation_matrix[7] / rotation_matrix[8]);
-
-				}
-				string roll1 = "roll: " + std::to_string(rad2deg(roll));
-				string pitch1 = "pitch: " + std::to_string(rad2deg(pitch));
-				string yaw1 = "yaw: " + std::to_string(rad2deg(yaw));
+				string roll1 = "roll: " + std::to_string(rad2deg(orientation.roll));
+				string pitch1 = "pitch: " + std::to_string(rad2deg(orientation.pitch));
+				string yaw1 = "yaw: " + std::to_string(rad2deg(orientation.yaw));
 				putText(frame, roll1, cv::Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
 				putText(frame, pitch1, cv::Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
 				putText(frame, yaw1, cv::Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
 
 				imshow("frame", frame);
 
-				//good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw);
-
-				
 				writer.write(frame);
 
-				//calculation_SFM(frame, found_opfl_points, prev_opfl_points);
-				//calculation_simple_Z(prevgray, gray, found_opfl_points, prev_opfl_points);
-
 				if (cv::waitKey(33) == 13) {
-					good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw, color);
+					goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
 				}
-
 
 			}
 			else
 			{
 				if (waitKey(33) == 27)	break;
 
-				good_features_init(frame, faces[0], prev_opfl_points, modelPoints, pitch, roll, yaw, color);
-
+				goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
 				cvtColor(frame, prev_gray_frame, COLOR_BGR2GRAY);
 
 				if (prev_opfl_points.size() != 0)
@@ -308,7 +275,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	//writer.release();
+	writer.release();
 
 	return 0;
 }
