@@ -12,3 +12,12 @@
 *.vcxproj
 *.filters
 *.avi
+*.exe
+*.ilk
+*.pdb
+*.log
+*.obj
+*.sbr
+*.suo
+*.user
+*.dll

@@ -1,3 +1,4 @@
+#include <windows.h>  // for MS Windows
 #include <cv.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,14 +16,23 @@
 #include <gl/glew.h>
 #include <gl/freeglut.h>
 
+//gl
+#include <GL/glut.h>  // GLUT, include glu.h and gl.h
 
 #include <windows.h> 
 #define _USE_MATH_DEFINES
 #include <math.h>
 #define FOCAL_LENGTH 1000
 
+//gl
+#define RED 1
+#define GREEN 2
+#define BLUE 3
+#define WHITE 4
+
 using namespace std;
 using namespace cv;
+
 
 struct opt_flow_parametrs{
 	Size win_size = Size(15, 15);
@@ -48,6 +58,19 @@ struct posit_orientation{
 	double yaw = 0;
 };
 
+GLfloat angleX = 0, angleY = 0, angleZ = 0;
+
+vector <Point2f> prev_opfl_points;
+vector<CvPoint3D32f> modelPoints;
+posit_orientation orientation;
+Mat frame, prev_gray_frame, gray_frame, face;
+opt_flow_parametrs opf_parametrs;
+Scalar color;
+bool second_frame = false;
+VideoCapture cap(0);
+
+CascadeClassifier face_cascade;
+
 double deg2rad(double deg)
 {
 	return (M_PI * deg / 180.0);
@@ -58,7 +81,7 @@ double rad2deg(double rad)
 	return (180.0 * rad / (M_PI));
 }
 
-Point3f projectPointsOnCylinder(cv::Point2f point, float r) {
+Point3f projectPointsOnCylinder(Point2f point, float r) {
 	cv::Point3f p;
 	p.x = point.x;
 	p.y = point.y;
@@ -93,7 +116,6 @@ void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_poin
 void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &found_opfl_points, Mat &prevgray, Mat &frame
 	, int &good_points_count, Rect face_rect, vector<float> &error, vector<uchar> &status, opt_flow_parametrs opf_parametrs, Scalar color){
 
-	//imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
 	Mat gray_frame;
 	cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
 
@@ -113,7 +135,7 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &
 
 		Point2f frame_coord = Point2f(found_opfl_points.at(i).x + face_rect.x);
 
-		if (delta < gray_frame.cols / 15 && status.at(i) == '\0' && error.at(i) == 0){
+		if (delta < gray_frame.cols / 15 /*&& status.at(i) == '\0'*/){
 
 			circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
 			line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
@@ -129,7 +151,8 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &
 	swap(prevgray, gray_frame);
 }
 
-void calculation_POSIT(vector<CvPoint3D32f> &modelPoints, vector<Point2f> &found_opfl_points, Size half_size, posit_orientation &orientation, int good_points_count)
+//!
+void calculation_POSIT(vector<CvPoint3D32f> &modelPoints, vector<Point2f> &found_opfl_points, Size half_size, int good_points_count)
 {
 	if (good_points_count > 6){
 		vector<Point3f> objectPoints;
@@ -154,7 +177,7 @@ void calculation_POSIT(vector<CvPoint3D32f> &modelPoints, vector<Point2f> &found
 	}
 }
 
-void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points, vector<CvPoint3D32f> &modelPoints, posit_orientation &orientation, Scalar &color)
+void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &prev_opfl_points, vector<CvPoint3D32f> &modelPoints, Scalar &color)
 {
 	orientation.roll = 0;
 	orientation.pitch = 0;
@@ -174,8 +197,8 @@ void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &
 
 	prev_opfl_points.clear();
 
-	goodFeaturesToTrack(gray_face, prev_opfl_points
-		, fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
+	goodFeaturesToTrack(gray_face, prev_opfl_points, 
+		fd_parametrs.max_ñorners, fd_parametrs.quality_level, fd_parametrs.min_distance, Mat(), fd_parametrs.block_size, 0, fd_parametrs.k);
 
 
 	modelPoints.clear();
@@ -189,24 +212,75 @@ void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &
 	}
 }
 
-int main(int argc, char* argv[])
+void init()
 {
-	vector <Point2f> prev_opfl_points;
-	vector<CvPoint3D32f> modelPoints;
-	Mat frame, prev_gray_frame, gray_frame, face;
-	opt_flow_parametrs opf_parametrs;
-	posit_orientation orientation;
-	Scalar color;
-	bool second_frame = false;
+	glClearColor(0, 0, 0, 0);
+	//glRotatef(90, 1.0, 0.0, 0.0);
+}
 
-	CascadeClassifier face_cascade;
-	face_cascade.load("E:/opencv2410/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
+void draw_angle( )
+{
+	//posit_orientation pos_or;
 
-	VideoCapture cap(0);
-	if (!cap.isOpened()){
-		printf("Camera could not be opened");
-		return -1;
-	}
+	glMatrixMode(GL_MODELVIEW);
+	// clear the drawing buffer.
+	glClear(GL_COLOR_BUFFER_BIT);
+	glLoadIdentity();
+
+	//Far away from center
+	glTranslatef(-1, -1, -11);
+	//glRotatef(90, 1.0, 0.0, 0.0);
+
+	//rotation about X axis
+	//glRotatef(angleX, 1.0, 0.0, 0.0);
+
+	glRotatef(rad2deg(orientation.roll), 1.0, 0.0, 0.0);
+
+	// rotation about Y axis
+	//glRotatef(angleY, 0.0, 1.0, 0.0);
+	
+	glRotatef(rad2deg(orientation.pitch)-90, 0.0, 1.0, 0.0);
+
+	// rotation about Z axis
+	//glRotatef(angleZ, 0.0, 0.0, 1.0);
+	glRotatef(rad2deg(orientation.yaw), 0.0, 0.0, 1.0);
+
+	cout << orientation.roll << " " << orientation.pitch << " " << orientation.yaw << endl;
+
+	//X-red
+	glBegin(GL_LINE_STRIP);
+
+	glColor3f(1.0f, 0.0f, 0.0f);
+	glVertex3f(2.00, 0.00, 0.00);
+	glColor3f(1.0f, 1.0f, 1.0f);
+	glVertex3f(-2.00, 0.00, 0.00);
+	glEnd();
+	
+	//Y-green
+	glBegin(GL_LINE_STRIP);
+
+	glColor3f(0.0f, 1.0f, 0.0f);
+	glVertex3f(0.00, 2.00, 0.00);
+	glColor3f(0.0f, 1.0f, 0.0f);
+	glVertex3f(0.00, -2.00, 0.00);
+
+	glEnd();
+
+	//Z-blue
+	glBegin(GL_LINE_STRIP);
+
+	glColor3f(0.0f, 0.0f, 1.0f);
+	glVertex3f(0.00, 0.00, 2.00);
+	glColor3f(0.0f, 0.0f, 1.0f);
+	glVertex3f(0.00, 0.00, -2.00);
+
+	glEnd();
+	
+	glFlush();
+}
+
+void animation( )
+{
 
 	cap >> frame;
 
@@ -216,12 +290,16 @@ int main(int argc, char* argv[])
 	if (!writer.isOpened())
 	{
 		printf("Output video could not be opened");
-		return -1;
+		//return -1;
 	}
 
-	while (1){
-		if (waitKey(33) == 27)	break;
+	/*while (1){
+		if (waitKey(33) == 27)	
+			break;
+	*/
 		cap >> frame;
+
+		//imshow("frame1", frame);
 
 		vector<Rect> faces;
 		face_cascade.detectMultiScale(frame, faces, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(100, 100));
@@ -239,43 +317,98 @@ int main(int argc, char* argv[])
 				);
 
 			if (second_frame){
+
 				vector<Point2f> found_opfl_points;
 				int good_points_count = 0;
 
 				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, frame, good_points_count, face_rect
 					, error, status, opf_parametrs, color);
 
-				calculation_POSIT(modelPoints, found_opfl_points, half_size, orientation, good_points_count);
+				calculation_POSIT(modelPoints, found_opfl_points, half_size, good_points_count);
 
-				string roll1 = "roll: " + std::to_string(rad2deg(orientation.roll));
-				string pitch1 = "pitch: " + std::to_string(rad2deg(orientation.pitch));
-				string yaw1 = "yaw: " + std::to_string(rad2deg(orientation.yaw));
-				putText(frame, roll1, cv::Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
-				putText(frame, pitch1, cv::Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
-				putText(frame, yaw1, cv::Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
+				string roll1 = "roll: " + to_string(rad2deg(orientation.roll));
+				string pitch1 = "pitch: " + to_string(rad2deg(orientation.pitch));
+				string yaw1 = "yaw: " + to_string(rad2deg(orientation.yaw));
+				putText(frame, roll1, Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, pitch1, Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, yaw1, Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
 
 				imshow("frame", frame);
 
 				writer.write(frame);
 
-				if (cv::waitKey(33) == 13) {
-					goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
+				if (waitKey(33) == 13){
+					goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, color);
 				}
-
 			}
+
 			else
 			{
-				if (waitKey(33) == 27)	break;
+				imshow("frame", frame);
+				//if (waitKey(33) == 27)	
+					//break;
 
-				goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
+				goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, color);
 				cvtColor(frame, prev_gray_frame, COLOR_BGR2GRAY);
 
 				if (prev_opfl_points.size() != 0)
 					second_frame = true;
+
 			}
 		}
-	}
+
+	//}
+
 	writer.release();
 
+	draw_angle();
+	
+}
+
+void reshape(int x, int y)
+{
+	if (y == 0 || x == 0) return; //Nothing is visible then, so return
+
+	//Set a new projection matrix
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	//Angle of view:40 degrees
+	//Near clipping plane distance: 0.5
+	//Far clipping plane distance: 20.0
+	gluPerspective(40.0, (GLdouble)x / (GLdouble)y, 0.5, 20.0);
+	glMatrixMode(GL_MODELVIEW);
+	glViewport(0, 0, x, y); //Use the whole window for rendering
+}
+
+int main(int argc, char* argv[])
+{
+	
+	face_cascade.load("C:/opencv/sources/data/haarcascades/haarcascade_frontalface_alt2.xml");
+	
+	if (!cap.isOpened()) {
+		printf("Camera could not be opened");
+		//return -1;
+	}
+
+	//gl
+	glutInit(&argc, argv);
+	// we initizlilze the glut. functions
+	glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+	glutInitWindowSize(800, 600);
+	glutInitWindowPosition(40, 40);
+	glutCreateWindow("Feflection of angle rotation.");
+	init();
+
+	//glRotatef(90, 1.0, 0.0, 0.0);
+
+	//gl
+	glutDisplayFunc(draw_angle);
+	glutReshapeFunc(reshape);
+
+	glutIdleFunc(animation);
+
+	glutMainLoop();
+
 	return 0;
+
 }
