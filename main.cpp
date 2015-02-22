@@ -14,12 +14,12 @@
 #include <cxcore.h>
 #include <gl/glew.h>
 #include <gl/freeglut.h>
-
-
-#include <windows.h> 
-#define _USE_MATH_DEFINES
 #include <math.h>
+#include "stereoscopy.h"
+
+#define _USE_MATH_DEFINES
 #define FOCAL_LENGTH 1000
+
 
 using namespace std;
 using namespace cv;
@@ -48,14 +48,17 @@ struct posit_orientation{
 	double yaw = 0;
 };
 
+opt_flow_parametrs opf_parametrs;
+static const double pi = 3.14159265358979323846;
+
 double deg2rad(double deg)
 {
-	return (M_PI * deg / 180.0);
+	return (pi * deg / 180.0);
 }
 
 double rad2deg(double rad)
 {
-	return (180.0 * rad / (M_PI));
+	return (180.0 * rad / (pi));
 }
 
 Point3f projectPointsOnCylinder(cv::Point2f point, float r) {
@@ -91,18 +94,20 @@ void calculation_simple_Z(Mat &img1, Mat &img2, vector <Point2f> found_opfl_poin
 }
 
 void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &found_opfl_points, Mat &prevgray, Mat &frame
-	, int &good_points_count, Rect face_rect, vector<float> &error, vector<uchar> &status, opt_flow_parametrs opf_parametrs, Scalar color){
+	, int &good_points_count, Rect face_rect,  Scalar color){
 
-	//imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, gray_frame, error, status, opf_parametrs);
 	Mat gray_frame;
-	cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
 
+	vector<Point2f> found_opfl_points_good;
+	vector<Point2f> prev_opfl_points_good;
+	vector<float> error;
+	vector<uchar> status;
+		cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
 	if (prevgray.data)
 	{
 		calcOpticalFlowPyrLK(prevgray, gray_frame, prev_opfl_points, found_opfl_points, status
 			, error, opf_parametrs.win_size, opf_parametrs.max_level, opf_parametrs.term_crit
 			, opf_parametrs.lk_flags, opf_parametrs.min_eig_threshold);
-
 	}
 
 	good_points_count = 0;
@@ -113,19 +118,25 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &
 
 		Point2f frame_coord = Point2f(found_opfl_points.at(i).x + face_rect.x);
 
-		if (delta < gray_frame.cols / 15 && status.at(i) == '\0' && error.at(i) == 0){
-
+		if (delta < gray_frame.cols / 15 && status.at(i) == '\0' ){
 			circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
 			line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
-
-			prev_opfl_points.at(i) = found_opfl_points.at(i);
+			found_opfl_points_good.push_back(found_opfl_points.at(i));
+			prev_opfl_points_good.push_back(prev_opfl_points.at(i));
 			good_points_count++;
 		}
 		else
 		{
 			circle(frame, found_opfl_points.at(i), 1, CV_RGB(200, 0, 0), 2, 8, 0);
 		}
+
 	}
+	prev_opfl_points.clear();
+	found_opfl_points.clear();
+
+	prev_opfl_points = prev_opfl_points_good;
+	found_opfl_points = found_opfl_points_good;
+
 	swap(prevgray, gray_frame);
 }
 
@@ -150,7 +161,6 @@ void calculation_POSIT(vector<CvPoint3D32f> &modelPoints, vector<Point2f> &found
 		orientation.roll = atan(rotation_matrix[3] / rotation_matrix[0]);
 		orientation.pitch = atan((-rotation_matrix[6]) / (rotation_matrix[0]))*cos(orientation.roll) + rotation_matrix[3] * sin(orientation.roll);
 		orientation.yaw = atan(rotation_matrix[7] / rotation_matrix[8]);
-
 	}
 }
 
@@ -170,7 +180,7 @@ void goodfeatures_and_cylinder_init(Mat frame, Rect rect_face, vector<Point2f> &
 
 	float half_width = frame.cols / 2.0;
 	float half_height = frame.rows / 2.0;
-	float cylWidth = (float)rect_face.width;
+	float cylWidth = (float)rect_face.width*2;
 
 	prev_opfl_points.clear();
 
@@ -194,7 +204,6 @@ int main(int argc, char* argv[])
 	vector <Point2f> prev_opfl_points;
 	vector<CvPoint3D32f> modelPoints;
 	Mat frame, prev_gray_frame, gray_frame, face;
-	opt_flow_parametrs opf_parametrs;
 	posit_orientation orientation;
 	Scalar color;
 	bool second_frame = false;
@@ -231,37 +240,57 @@ int main(int argc, char* argv[])
 			vector<float> error;
 			vector<uchar> status;
 
-			Rect face_rect = Rect(
-				faces[0].x + faces[0].width / 4
-				, faces[0].y + faces[0].height / 3.5
-				, faces[0].width - faces[0].width / 2
-				, faces[0].height - faces[0].height / 1.3
-				);
+			Rect face_rect = faces[0];
 
 			if (second_frame){
 				vector<Point2f> found_opfl_points;
 				int good_points_count = 0;
 
-				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, frame, good_points_count, face_rect
-					, error, status, opf_parametrs, color);
+				xyz_coords_t *prev_points,*found_points;
 
-				calculation_POSIT(modelPoints, found_opfl_points, half_size, orientation, good_points_count);
+				imposition_opt_flow_LK(prev_opfl_points, found_opfl_points, prev_gray_frame, frame, good_points_count, face_rect, color);
 
-				string roll1 = "roll: " + std::to_string(rad2deg(orientation.roll));
-				string pitch1 = "pitch: " + std::to_string(rad2deg(orientation.pitch));
-				string yaw1 = "yaw: " + std::to_string(rad2deg(orientation.yaw));
-				putText(frame, roll1, cv::Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
-				putText(frame, pitch1, cv::Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
-				putText(frame, yaw1, cv::Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
 
-				imshow("frame", frame);
+				//calculation_POSIT(modelPoints, found_opfl_points, half_size, orientation, good_points_count);
+				string roll1 = "roll: " + to_string(rad2deg(orientation.roll));
+				string pitch1 = "pitch: " + to_string(rad2deg(orientation.pitch));
+				string yaw1 = "yaw: " + to_string(rad2deg(orientation.yaw));
+				putText(frame, roll1, Point(10, 30), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, pitch1, Point(10, 60), 2, 1.0, CV_RGB(255, 255, 255));
+				putText(frame, yaw1, Point(10, 90), 2, 1.0, CV_RGB(255, 255, 255));
 
-				writer.write(frame);
+				prev_points = alloc_xyz_coords(good_points_count);
+				found_points = alloc_xyz_coords(good_points_count);
 
-				if (cv::waitKey(33) == 13) {
-					goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
+				for (int i = 0; i < good_points_count; i++)
+				{
+					prev_points->x[i] = prev_opfl_points.at(i).x;
+					prev_points->y[i] = prev_opfl_points.at(i).y;
+					prev_points->z[i] = 0;
+
+					found_points->x[i] = found_opfl_points.at(i).x;
+					found_points->y[i] = found_opfl_points.at(i).y;
+					found_points->z[i] = 0;
 				}
 
+				get_3d_object_coords(prev_points,0.0,found_points,10.0);
+
+				imshow("frame", frame);				
+				writer.write(frame);				
+
+				//if (cv::waitKey(33) == 13) {
+				//	//первый способ
+				//	ofstream F1,F2;
+				//	F1.open("./point1.txt");
+				//	F2.open("./point2.txt");
+				//	for (unsigned int i = 0; i < found_opfl_points.size(); i++){
+				//		F1 << prev_opfl_points.at(i).x << "\t" << prev_opfl_points.at(i).y << endl;
+				//		F2 << found_opfl_points.at(i).x << "\t" << found_opfl_points.at(i).y << endl;
+				//	}
+				//	F1.close();
+				//	F2.close();
+				//}
+				goodfeatures_and_cylinder_init(frame, face_rect, prev_opfl_points, modelPoints, orientation, color);
 			}
 			else
 			{
