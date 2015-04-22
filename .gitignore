@@ -12,3 +12,10 @@
 *.vcxproj
 *.filters
 *.avi
+*.exe
+*.log
+*.obj
+*.sbr
+*.pdb
+*.suo
+*.user

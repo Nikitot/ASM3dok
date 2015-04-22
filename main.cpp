@@ -115,9 +115,7 @@ void imposition_opt_flow_LK(vector<Point2f> &prev_opfl_points, vector<Point2f> &
 		float delta_x = abs(found_opfl_points.at(i).x - prev_opfl_points.at(i).x);
 		float delta_y = abs(found_opfl_points.at(i).y - prev_opfl_points.at(i).y);
 		double delta = pow(pow(delta_x, 2) + pow(delta_y, 2), 0.5);
-
-		Point2f frame_coord = Point2f(found_opfl_points.at(i).x + face_rect.x);
-
+		
 		if (delta < gray_frame.cols / 15 && status.at(i) == '\0' ){
 			circle(frame, found_opfl_points.at(i), 1, color, 2, 8, 0);
 			line(frame, prev_opfl_points.at(i), found_opfl_points.at(i), color);
@@ -275,7 +273,7 @@ int main(int argc, char* argv[])
 
 				get_3d_object_coords(prev_points,0.0,found_points,10.0);
 
-				imshow("frame", frame);				
+				imshow("frame1", frame);				
 				writer.write(frame);				
 
 				//if (cv::waitKey(33) == 13) {
