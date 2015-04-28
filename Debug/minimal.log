@@ -1,0 +1,10 @@
+﻿Build started 18.04.2015 20:11:39.
+     1>Project "C:\Users\Nik\Documents\ASM3dok\minimal.vcxproj" on node 2 (Build target(s)).
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V140\Microsoft.CppBuild.targets(388,5): warning MSB8028: The intermediate directory (Debug\) contains files shared from another project (minimal.vcxproj).  This can lead to incorrect clean and rebuild behavior.
+     1>Link:
+         minimal.vcxproj -> C:\Users\Nik\Documents\ASM3dok\\ASM3dOK.exe
+     1>Done Building Project "C:\Users\Nik\Documents\ASM3dok\minimal.vcxproj" (Build target(s)).
+
+Build succeeded.
+
+Time Elapsed 00:00:00.07
